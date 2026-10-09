@@ -5,10 +5,11 @@ import * as THREE from 'three';
 import { InkRenderer, INK, makeInkMaterial } from './render.js';
 import { World } from './physics.js';
 import { Input } from './input.js';
-import { buildLevel, LEVELS } from './level.js';
+import { buildLevel, LEVELS, normalizeMapConfig, readMapConfig, serializeMapConfig, writeMapConfig } from './level.js';
 import { NavGrid } from './nav.js';
 import { Effects } from './effects.js';
 import { EnemyManager, BOSSES } from './enemies.js';
+import { TrainingManager } from './training.js';
 import { Player } from './player.js';
 import { RemotePlayer, encodeLocal } from './players.js';
 import { WEAPON_REGISTRY, WEAPON_IDS, weaponMeta } from './weapons.js';
@@ -21,22 +22,25 @@ import { rand, choose, clamp } from './util.js';
 const canvas = document.getElementById('c');
 const R = new InkRenderer(canvas);
 const world = new World();
-const knownMap = (k) => (LEVELS.some((m) => m.key === k) ? k : 'district');
-let mapKey = knownMap(localStorage.getItem('doodle_map') || 'district');
-let level = buildLevel(R.scene, world, mapKey, { arena: false });
+const mapLabelKey = (config) => normalizeMapConfig(config, LEVELS).key;
+let mapConfig = readMapConfig(localStorage, LEVELS);
+let level = buildLevel(R.scene, world, mapConfig, { arena: false });
 let nav = new NavGrid(world, level.bounds, 1).build();
-let loadedKey = mapKey, arenaLoaded = false;
-audio.setTune(mapKey === 'mexico' ? 'mexico' : 'district');
+let loadedMapConfig = serializeMapConfig(mapConfig, LEVELS), arenaLoaded = false;
+audio.setTune(mapLabelKey(mapConfig) === 'mexico' ? 'mexico' : 'district');
 // the map in play: solo uses the picked map, a match uses the host's choice; a rebuild wipes broken props
-function setLevel(key, on, force = false) {
-  if (!force && key === loadedKey && on === arenaLoaded) return; loadedKey = key; arenaLoaded = on;
+function sameMapConfig(a, b) { return a.type === b.type && a.key === b.key; }
+function activeMapConfig() { return normalizeMapConfig(net.active ? (lobby.mapConfig || lobby.map || mapConfig) : mapConfig, LEVELS); }
+function setLevel(nextConfig, on, force = false) {
+  const config = serializeMapConfig(nextConfig, LEVELS);
+  if (!force && sameMapConfig(config, loadedMapConfig) && on === arenaLoaded) return; loadedMapConfig = config; arenaLoaded = on;
   for (const m of level.meshes) { R.scene.remove(m); if (m.geometry) m.geometry.dispose(); if (m.traverse) m.traverse((o) => { if (o !== m && o.geometry) o.geometry.dispose(); }); }
   level.animated.length = 0; world.clear();
-  level = buildLevel(R.scene, world, key, { arena: on }); nav = new NavGrid(world, level.bounds, 1).build();
+  level = buildLevel(R.scene, world, config, { arena: on }); nav = new NavGrid(world, level.bounds, 1).build();
   ctx.level = level; ctx.nav = nav; if (window.__game) { window.__game.level = level; window.__game.nav = nav; }
-  audio.setTune(key === 'mexico' ? 'mexico' : 'district');
+  audio.setTune(config.key === 'mexico' ? 'mexico' : 'district');
 }
-const setArena = (on) => setLevel(knownMap(net.active ? (lobby.map || mapKey) : mapKey), on);
+const setArena = (on) => setLevel(activeMapConfig(), on);
 const input = new Input(canvas);
 const hud = new HUD(document.getElementById('hud'));
 const effects = new Effects(R.scene, world);
@@ -66,14 +70,15 @@ const game = ctx.game = {
 };
 const online = () => game.mode === 'ffa';
 const enemies = ctx.enemies = new EnemyManager(ctx);
+const training = ctx.training = new TrainingManager(ctx);
 const player = ctx.player = new Player(ctx);
 player.name = myName;
 const net = new Net();
 const remote = new Map();      // peer id -> RemotePlayer
-const lobby = { players: new Map(), hostId: null, isPublic: true, status: '', code: '', map: null };
+const lobby = { players: new Map(), hostId: null, isPublic: true, status: '', code: '', mapConfig: null, map: null };
 const scores = new Map();      // peer id -> { name, kills, deaths }
 let screen = 'main';           // which start-screen panel is showing: main | online | lobby
-window.__game = { ctx, game, player, enemies, nav, world, level, hud, effects, input, net, remote, lobby, scores };
+window.__game = { ctx, game, player, enemies, training, nav, world, level, hud, effects, input, net, remote, lobby, scores };
 
 // anything a bullet or a blade can hit besides enemies
 ctx.targets = () => [player, ...remote.values()];
@@ -437,7 +442,8 @@ function addRemote(id, name) {
 }
 function removeRemote(id) { const r = remote.get(id); if (r) { r.dispose(); remote.delete(id); } lobby.players.delete(id); scores.delete(id); }
 function lobbyRows() { return [...lobby.players.entries()].map(([id, p]) => ({ id, name: p.name, loadout: serializeLoadout(p.loadout || loadout, WEAPON_REGISTRY) })); }
-function broadcastLobby() { net.send('lobby', { players: lobbyRows(), hostId: net.id, isPublic: lobby.isPublic, map: lobby.map || mapKey, shown: net.aliasCode || net.code }); renderLobby(); }
+function lobbyMapConfig() { return serializeMapConfig(lobby.mapConfig || lobby.map || mapConfig, LEVELS); }
+function broadcastLobby() { const config = lobbyMapConfig(); net.send('lobby', { players: lobbyRows(), hostId: net.id, isPublic: lobby.isPublic, mapConfig: config, map: config.key, shown: net.aliasCode || net.code }); renderLobby(); }
 const inMatch = () => ['play', 'dying', 'over'].includes(game.state);
 net.onPeerLeave = (id) => { const nm = (lobby.players.get(id) || {}).name; removeRemote(id); broadcastLobby(); if (inMatch()) { hud.kill((nm || '某人') + ' 离开了', 0); sendScores(); } };
 net.onDisconnect = () => { if (lobby.order && lobby.order.some((id) => id !== lobby.hostId)) migrateHost(); else leaveOnline('房主离开了大厅'); };
@@ -479,10 +485,10 @@ net.onPeerJoin = (from, meta) => {
   const peerLoadout = normalizeLoadout(meta && meta.loadout, WEAPON_REGISTRY);
   lobby.players.set(from, { name, loadout: peerLoadout });
   const remotePlayer = addRemote(from, name); remotePlayer.setLoadout(peerLoadout, WEAPON_REGISTRY); broadcastLobby();
-  if (game.state === 'play' || game.state === 'dying') { if (!scores.has(from)) scores.set(from, { name, kills: 0, deaths: 0 }); net.sendTo(from, 'start', { late: true, spawn: farthestSpawnIndex(), map: lobby.map || mapKey, broken: level.breakables.filter((b) => !b.alive).map((b) => b.id) }); sendScores(); hud.kill(name + ' 加入了', 0); }
+  if (game.state === 'play' || game.state === 'dying') { if (!scores.has(from)) scores.set(from, { name, kills: 0, deaths: 0 }); const config = lobbyMapConfig(); net.sendTo(from, 'start', { late: true, spawn: farthestSpawnIndex(), mapConfig: config, map: config.key, broken: level.breakables.filter((b) => !b.alive).map((b) => b.id) }); sendScores(); hud.kill(name + ' 加入了', 0); }
 };
 net.on('lobby', (d) => {
-  lobby.hostId = d.hostId; lobby.isPublic = !!d.isPublic; lobby.code = net.code; lobby.shown = d.shown || net.code; if (d.map) lobby.map = knownMap(d.map); lobby.order = d.players.map((p) => p.id); lobby.players.clear();
+  lobby.hostId = d.hostId; lobby.isPublic = !!d.isPublic; lobby.code = net.code; lobby.shown = d.shown || net.code; lobby.mapConfig = normalizeMapConfig(d.mapConfig || d.map, LEVELS); lobby.map = lobby.mapConfig.key; lobby.order = d.players.map((p) => p.id); lobby.players.clear();
   for (const p of d.players) lobby.players.set(p.id, { name: p.name, loadout: normalizeLoadout(p.loadout, WEAPON_REGISTRY) });
   for (const p of d.players) if (p.id !== net.id) { const remotePlayer = addRemote(p.id, p.name); remotePlayer.setLoadout(p.loadout, WEAPON_REGISTRY); }
   for (const id of [...remote.keys()]) if (!lobby.players.has(id)) removeRemote(id);
@@ -490,7 +496,7 @@ net.on('lobby', (d) => {
   renderLobby();
 });
 net.on('leave', (d) => { const nm = (lobby.players.get(d.id) || {}).name; removeRemote(d.id); if (inMatch()) hud.kill((nm || '某人') + ' 离开了', 0); renderLobby(); });
-net.on('start', (d) => { if (net.isHost) return; if (d.map) lobby.map = knownMap(d.map); startMatch(!!d.late, d.spawns ? d.spawns[net.id] : d.spawn); if (d.broken) for (const id of d.broken) { const br = level.breakables[id]; if (br) breakProp(br, null, false, true); } });
+net.on('start', (d) => { if (net.isHost) return; lobby.mapConfig = normalizeMapConfig(d.mapConfig || d.map, LEVELS); lobby.map = lobby.mapConfig.key; startMatch(!!d.late, d.spawns ? d.spawns[net.id] : d.spawn); if (d.broken) for (const id of d.broken) { const br = level.breakables[id]; if (br) breakProp(br, null, false, true); } });
 net.on('startreq', () => { if (net.isHost && game.state === 'lobby') hostStart(); });
 net.on('end', (d) => endMatch(d));
 net.on('backtolobby', () => { if (!net.isHost) toLobbyScreen(); });
@@ -572,7 +578,7 @@ async function createLobby(isPublic) {
   setStatus('正在创建大厅…');
   try { await net.host({ isPublic }); }
   catch (err) { setStatus(friendlyError(err)); unlockButtons(); return; }
-  lobby.isPublic = isPublic; lobby.map = mapKey; lobby.players.clear(); lobby.players.set(net.id, { name: myName, loadout: loadout.slice() }); lobby.hostId = net.id; lobby.status = '';
+  lobby.isPublic = isPublic; lobby.mapConfig = serializeMapConfig(mapConfig, LEVELS); lobby.map = lobby.mapConfig.key; lobby.players.clear(); lobby.players.set(net.id, { name: myName, loadout: loadout.slice() }); lobby.hostId = net.id; lobby.status = '';
   game.state = 'lobby'; screen = 'lobby'; showStart();
 }
 async function joinLobby(code) {
@@ -625,9 +631,9 @@ function checkpointHTML() {
   return h + '</div>';
 }
 function wireCheckpoints(onGo) { const box = hud.el.panel.querySelector('.checkpoints'); if (!box) return; box.addEventListener('click', (e) => { e.stopPropagation(); const b = e.target.closest('button'); if (b) onGo(Number(b.dataset.cp)); }); }
-const mapName = (k) => (LEVELS.find((m) => m.key === k) || LEVELS[0]).name;
-function mapHTML(sel, canPick) { if (LEVELS.length < 2) return ''; return `<div class="mapsel" id="mapsel"><span>地图</span>${LEVELS.map((m) => `<button type="button" class="mapbtn${m.key === sel ? ' on' : ''}" data-map="${m.key}" ${canPick ? '' : 'disabled'}>${m.name}<i>${m.blurb}</i></button>`).join('')}</div>`; }
-function wireMap(onPick) { const box = hud.el.panel.querySelector('#mapsel'); if (!box) return; box.addEventListener('click', (e) => { e.stopPropagation(); const b = e.target.closest('.mapbtn'); if (b && !b.disabled) onPick(b.dataset.map); }); }
+const mapName = (config) => (LEVELS.find((m) => m.key === mapLabelKey(config)) || LEVELS[0]).name;
+function mapHTML(sel, canPick) { const selected = mapLabelKey(sel); if (LEVELS.length < 2) return ''; return `<div class="mapsel" id="mapsel"><span>地图</span>${LEVELS.map((m) => `<button type="button" class="mapbtn${m.key === selected ? ' on' : ''}" data-map="${m.key}" ${canPick ? '' : 'disabled'}>${m.name}<i>${m.blurb}</i></button>`).join('')}</div>`; }
+function wireMap(onPick) { const box = hud.el.panel.querySelector('#mapsel'); if (!box) return; box.addEventListener('click', (e) => { e.stopPropagation(); const b = e.target.closest('.mapbtn'); if (b && !b.disabled) onPick({ type: 'fixed', key: b.dataset.map }); }); }
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
 function loadoutHTML() {
@@ -657,8 +663,8 @@ function wireLoadout() {
 
 function mainHTML() {
   return `<h1>涂鸦街区</h1><h2>一款涂鸦风生存射击游戏</h2>
-    <div class="mainbtns"><button type="button" class="start" id="soloBtn">开始游戏<i>单人 · 抵御一波波敌人</i></button><button type="button" id="onlineBtn">在线对战<i>自由混战 · 最多 10 名玩家</i></button></div>
-    ${mapHTML(mapKey, true)}${loadoutHTML()}${CONTROLS_HTML}${settingsHTML()}${checkpointHTML()}${best ? `<div class="beststat">最高分：${best}</div>` : ''}`;
+    <div class="mainbtns"><button type="button" class="start" id="soloBtn">开始游戏<i>单人 · 抵御一波波敌人</i></button><button type="button" id="trainingBtn">训练场<i>练枪、靶道、移动靶和假人靶</i></button><button type="button" id="onlineBtn">在线对战<i>自由混战 · 最多 10 名玩家</i></button></div>
+    ${mapHTML(mapConfig, true)}${loadoutHTML()}${CONTROLS_HTML}${settingsHTML()}${checkpointHTML()}${best ? `<div class="beststat">最高分：${best}</div>` : ''}`;
 }
 function onlineHTML() {
   return `<h1>在线对战</h1><h2>自由混战 · 先到 ${FFA_TARGET} 杀 · 最多 10 名玩家</h2>
@@ -679,7 +685,7 @@ function lobbyHTML() {
   return `<h1>大厅</h1><h2>自由混战 · 先到 ${FFA_TARGET} 杀 · ${n}/${net.maxPlayers} 名玩家</h2>
     <div class="online" id="online">
       <div class="row"><span>代码</span><span class="code">${String(net.isHost ? (net.aliasCode || net.code) : (lobby.shown || net.code) || '').replace(/-\d+$/, '')}</span></div>
-      ${mapHTML(lobby.map || mapKey, host)}
+      ${mapHTML(lobby.mapConfig || lobby.map || mapConfig, host)}
       <div class="hint">${lobby.isPublic ? '该大厅为公开：任何人都可通过快速匹配或输入代码加入' : '私密大厅：好友在「在线对战 → 加入」中输入此代码'}</div>
       <div class="plist">${rows.map((p) => `<div class="${p.id === lobby.hostId ? 'host' : ''}${p.id === net.id ? ' me' : ''}"><span>${esc(p.name)}</span><span>${p.id === net.id ? '你' : ''}</span></div>`).join('')}</div>
       <div class="row"><button type="button" class="big" id="startBtn">开始对战</button><button type="button" class="alt" id="leaveBtn">离开</button></div>
@@ -709,7 +715,7 @@ function wireOnline() {
   if (q('backBtn')) q('backBtn').addEventListener('click', () => { lobby.status = ''; lobby.rejoinCode = null; screen = 'main'; showStart(); });
   if (q('refreshBtn')) { q('refreshBtn').addEventListener('click', () => refreshLobbies()); if (!lobbyList && !listBusy) refreshLobbies(); }
   if (q('lobbyRows')) q('lobbyRows').addEventListener('click', (e) => { const b = e.target.closest('button[data-join]'); if (b) { lockButtons(box); joinLobby(b.dataset.join); } });
-  wireMap((k) => { if (net.isHost) { lobby.map = k; broadcastLobby(); } });
+  wireMap((config) => { if (net.isHost) { lobby.mapConfig = serializeMapConfig(config, LEVELS); lobby.map = lobby.mapConfig.key; broadcastLobby(); } });
   if (q('startBtn')) q('startBtn').addEventListener('click', () => { if (net.isHost) hostStart(); else { net.send('startreq', {}); setStatus('正在请求房主开始…'); } });
   if (q('leaveBtn')) q('leaveBtn').addEventListener('click', () => { lobby.rejoinCode = null; leaveOnline(''); });
 }
@@ -723,8 +729,9 @@ function showStart() {
   hud.showScreen(html);
   const p = hud.el.panel;
   if (screen === 'main') {
-    wireLoadout(); wireSettings(); wireCheckpoints((w) => beginAtWave(w)); wireMap((k) => { mapKey = k; localStorage.setItem('doodle_map', k); showStart(); });
+    wireLoadout(); wireSettings(); wireCheckpoints((w) => beginAtWave(w)); wireMap((config) => { mapConfig = writeMapConfig(localStorage, LEVELS, config); showStart(); });
     p.querySelector('#soloBtn').addEventListener('click', (e) => { e.stopPropagation(); begin(); });
+    p.querySelector('#trainingBtn').addEventListener('click', (e) => { e.stopPropagation(); beginTraining(); });
     p.querySelector('#onlineBtn').addEventListener('click', (e) => { e.stopPropagation(); screen = 'online'; showStart(); });
   } else wireOnline();
 }
@@ -733,7 +740,7 @@ function showPause() {
     hud.showScreen(`<h1>菜单</h1><h2>自由混战 · 大厅 ${String(net.aliasCode || net.code || '').replace(/-\d+$/, '')}</h2><div class="scoreboard">${sortedScores().map(([id, s]) => `<div class="${id === net.id ? 'me' : ''}"><span>${esc(s.name)}</span><span>${s.kills} 杀 · ${s.deaths} 死</span></div>`).join('')}</div>${CONTROLS_HTML}${settingsHTML()}<div class="online" id="online"><div class="row"><button type="button" class="alt" id="leaveBtn">离开对战</button></div></div><div class="go">点击任意位置（或按 ${hud.key('confirm')}）继续游戏</div>`);
     wireSettings(); wireOnline(); return;
   }
-  hud.showScreen(`<h1>已暂停</h1><h2>第 ${game.wave} 波 · 得分 ${game.score}</h2>${CONTROLS_HTML}${settingsHTML()}${menuBtnHTML()}<div class="go">点击任意位置（或按 ${hud.key('confirm')}）继续</div>`);
+  hud.showScreen(game.mode === 'training' ? `<h1>训练暂停</h1><h2>得分 ${game.score}</h2>${CONTROLS_HTML}${settingsHTML()}${menuBtnHTML()}<div class="go">点击任意位置（或按 ${hud.key('confirm')}）继续</div>` : `<h1>已暂停</h1><h2>第 ${game.wave} 波 · 得分 ${game.score}</h2>${CONTROLS_HTML}${settingsHTML()}${menuBtnHTML()}<div class="go">点击任意位置（或按 ${hud.key('confirm')}）继续</div>`);
   wireSettings(); wireMenuBtn();
 }
 function showClickToPlay() { hud.showScreen(`<h1>对战开始</h1><h2>自由混战 · 先到 ${FFA_TARGET} 杀</h2><div class="go">点击任意位置（或按 ${hud.key('confirm')}）开始作战</div>`); }
@@ -749,7 +756,8 @@ function toLobbyScreen() { net.inMatch = false; for (const r of remote.values())
 
 // ---------------- run control ----------------
 function resetGame() {
-  if (level.breakables.some((b) => !b.alive)) setLevel(loadedKey, arenaLoaded, true);
+  if (level.breakables.some((b) => !b.alive)) setLevel(loadedMapConfig, arenaLoaded, true);
+  if (ctx.training) ctx.training.clear();
   enemies.clear(); effects.clear(); for (const p of pickups) R.scene.remove(p.mesh); pickups.length = 0; pickupClock = 0;
   player.maxHp = online() ? 110 : 120; player.regenDelay = online() ? 4 : 4.5; player.regenRate = online() ? 14 : 11;
   player.reset(level.playerStart); player.name = myName; player.lastHitBy = null; player.lastHit = null; enemies.mods.speed = 1; enemies.mods.damage = 1; hud.setModifier(''); hud.setBoss(null, null); game.boss = null; endFocus(); game.katanaStreak = 0;
@@ -758,13 +766,14 @@ function resetGame() {
 function beginCommon() { audio.init(); audio.resume(); if (!input.usingGamepad) input.requestLock(); if (musicWanted && !audio.musicPlaying) audio.musicOn(true); hud.hideScreen(); hud.setGameplayVisible(true); game.menu = false; }
 function begin() { game.mode = 'solo'; setArena(false); beginCommon(); if (game.state === 'start' || game.state === 'dead') { resetGame(); startWave(1); } game.state = 'play'; }
 function beginAtWave(n) { game.mode = 'solo'; setArena(false); beginCommon(); resetGame(); startWave(n); game.state = 'play'; }
+function beginTraining() { game.mode = 'training'; setLevel({ type: 'fixed', key: 'training' }, false); beginCommon(); resetGame(); training.start(level); game.state = 'play'; hud.setWave('训练', training.targets.length); hud.message('训练场', '练习射击、移动和抓钩 · Esc 返回菜单', 3); }
 function jumpToWave(n) { enemies.clear(); effects.clear(); enemies.mods.speed = 1; enemies.mods.damage = 1; endFocus(); game.intermission = 0; game.queue = []; startWave(n); hud.hideScreen(); hud.setGameplayVisible(true); game.state = 'play'; game.menu = false; audio.reelLoop(false); }
 function hostStart() {
   scores.clear(); for (const [id, p] of lobby.players) scores.set(id, { name: p.name, kills: 0, deaths: 0 });
   // deal everyone a different spot, shuffled so the same people do not always start together
   setArena(true); const order = spawnSpots().map((_, i) => i); for (let i = order.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [order[i], order[j]] = [order[j], order[i]]; }
   const spawns = {}; [...lobby.players.keys()].forEach((id, i) => { spawns[id] = order[i % order.length]; });
-  net.send('start', { spawns, map: lobby.map || mapKey }); startMatch(false, spawns[net.id]); sendScores();
+  const config = lobbyMapConfig(); net.send('start', { spawns, mapConfig: config, map: config.key }); startMatch(false, spawns[net.id]); sendScores();
 }
 function startMatch(late, spawnIdx) {
   net.inMatch = true; game.mode = 'ffa'; setArena(true); resetGame(); matchLeft = FFA_TIME; clockT = 0; game.clockStarted = false;
@@ -778,8 +787,8 @@ function startMatch(late, spawnIdx) {
   setTimeout(() => { if (game.state === 'play' && !input.pointerLocked && !input.usingGamepad) { game.menu = true; showClickToPlay(); } }, 250);
 }
 function pause() { if ((game.state !== 'play' && !(game.state === 'dying' && online())) || game.menu) return; if (!online()) game.state = 'pause'; game.menu = true; showPause(); audio.reelLoop(false); }
-function resume() { if (online()) { game.menu = false; if (game.state === 'dying' && game.respawnT <= 0) game.respawnArm = input.lastActive; hud.hideScreen(); hud.setGameplayVisible(true); if (!input.usingGamepad) input.requestLock(); return; } begin(); }
-Object.assign(window.__game, { startWave, updateWaves, begin, beginAtWave, jumpToWave, resetGame, spawnPickup, focusCandidate, enterFocus, pickSpawn, startMatch, createLobby, joinLobby, quickPlay, leaveOnline, hostStart });
+function resume() { if (online()) { game.menu = false; if (game.state === 'dying' && game.respawnT <= 0) game.respawnArm = input.lastActive; hud.hideScreen(); hud.setGameplayVisible(true); if (!input.usingGamepad) input.requestLock(); return; } if (game.mode === 'training') { game.state = 'play'; game.menu = false; hud.hideScreen(); hud.setGameplayVisible(true); if (!input.usingGamepad) input.requestLock(); return; } begin(); }
+Object.assign(window.__game, { startWave, updateWaves, begin, beginAtWave, beginTraining, jumpToWave, resetGame, spawnPickup, focusCandidate, enterFocus, pickSpawn, startMatch, createLobby, joinLobby, quickPlay, leaveOnline, hostStart });
 hud.onScreenClick = () => {
   const st = game.state;
   if (st === 'over') { if (net.isHost) { net.send('backtolobby', {}); toLobbyScreen(); } return; }
@@ -825,8 +834,8 @@ function step(now) {
     game.time += sdt; if (player.shieldT > 0) player.shieldT -= dt;
     musicHealT -= dt; if (musicHealT <= 0) { musicHealT = 2; if (musicWanted && st === 'play' && !audio.musicPlaying && audio.ctx) audio.musicOn(true); if (input.anyInput) audio.resume(); }
     { const B = level.bounds, bp = player.body.pos; if (bp.x < B.minX - 8 || bp.x > B.maxX + 8 || bp.z < B.minZ - 8 || bp.z > B.maxZ + 8 || bp.y > 150) bp.y = -100; }
-    player.update(sdt); enemies.update(sdt); effects.update(sdt); updatePickups(sdt); netUpdate(dt);
-    if (st === 'play' && !online()) updateWaves(sdt);
+    player.update(sdt); enemies.update(sdt); if (game.mode === 'training') training.update(sdt); effects.update(sdt); updatePickups(sdt); netUpdate(dt);
+    if (st === 'play' && !online() && game.mode !== 'training') updateWaves(sdt);
     if (online()) updateArenaPickups(dt);
     if (game.comboT > 0) { game.comboT -= sdt; if (game.comboT <= 0) { game.combo = 0; hud.setScore(game.score, 0); } }
     if (st === 'dying') {

@@ -1,0 +1,3 @@
+interface:
+  display_name: "Training Map Validation"
+  short_description: "Validate Doodle Shooter training arena"

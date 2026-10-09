@@ -147,13 +147,15 @@ export class Gun extends ViewModel {
     if (this.mag === 0 && this.reloadType === 'mag') setTimeout(() => { if (this.mag === 0 && !this.reloading) this.startReload(); }, 250);
   }
   fireRay(origin, dir) {
-    const ctx = this.ctx; const hitE = ctx.enemies.raycast(origin, dir, 300), hitW = ctx.world.raycast(origin, dir, 300, SEE_THROUGH); let end, hit = false;
+    const ctx = this.ctx; const hitE = ctx.enemies.raycast(origin, dir, 300), hitT = ctx.training && ctx.game.mode === 'training' ? ctx.training.raycast(origin, dir, 300) : null, hitW = ctx.world.raycast(origin, dir, 300, SEE_THROUGH); let end, hit = false;
     // other players in a versus match are targets too; the closest thing along the ray wins
     const hitP = ctx.raycastPlayers ? ctx.raycastPlayers(origin, dir, 300) : null;
     if (hitP && (!hitE || hitP.dist < hitE.dist) && (!hitW || hitP.dist < hitW.dist)) {
       end = hitP.point; const crit = hitP.part === 'head'; const pv = this.pvp || [this.damage, this.headMul, this.falloff]; let d = pv[0] * (crit ? pv[1] : 1);
       if (pv[2]) d *= clamp(1 - (hitP.dist - pv[2][0]) / (pv[2][1] - pv[2][0]), pv[2][2], 1);
       ctx.hitPlayer(hitP.player, d, { point: hitP.point, dir, part: hitP.part, source: this.kind, crit, dist: hitP.dist }); hit = true;
+    } else if (hitT && (!hitE || hitT.dist < hitE.dist) && (!hitW || hitT.dist < hitW.dist)) {
+      end = hitT.point; ctx.training.damage(hitT.target, this.damage, { ...hitT, source: this.kind }); hit = true;
     } else if (hitW && hitW.box && hitW.box.data.breakable && (!hitE || hitW.dist < hitE.dist) && ctx.breakHit) {
       end = hitW.point; ctx.breakHit(hitW.box.data.breakable, this.damage, hitW.point, dir); hit = true;
     } else if (hitE && (!hitW || hitE.dist < hitW.dist)) {
@@ -345,6 +347,10 @@ export class Katana extends ViewModel {
     _v2.copy(P.forward); _v.set(-P.forward.z, 0, P.forward.x).multiplyScalar(s * 0.7); _v2.add(_v).y -= 0.35; _v2.normalize();
     let any = false;
     for (const h of hits) { any = true; const point = h.enemy.center.clone(); point.y += rand(-0.2, 0.4); ctx.enemies.damage(h.enemy, this.damage, { point, dir: _v2.clone(), part: 'torso', source: 'katana', crit: false, slashDir: s }); }
+    if (ctx.training && ctx.game.mode === 'training') {
+      const hit = ctx.training.raycast(P.eye, P.forward, 3.2);
+      if (hit) { any = true; ctx.training.damage(hit.target, this.damage, { ...hit, source: 'katana' }); }
+    }
     if (ctx.playersInArc) for (const t of ctx.playersInArc(P.eye, P.forward, 3.0, Math.cos(0.95))) { any = true; ctx.hitPlayer(t, 55, { point: t.center.clone(), dir: _v2.clone(), part: 'torso', source: 'katana', crit: false }); }
     if (ctx.cutRopes && ctx.cutRopes(P.eye, P.forward, 3.4)) any = true;
     if (ctx.breakablesInArc) for (const br of ctx.breakablesInArc(P.eye, P.forward, 3.2, Math.cos(1.0))) { any = true; ctx.breakHit(br, this.damage, br.pos.clone(), _v2.clone()); }

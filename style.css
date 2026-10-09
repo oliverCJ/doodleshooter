@@ -2,8 +2,8 @@
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--paper); font-family: 'Comic Sans MS', 'Marker Felt', 'Segoe Print', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', sans-serif; }
 canvas#c { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
 #hud { position: fixed; inset: 0; pointer-events: none; color: var(--ink); user-select: none; overflow: hidden; }
-.hud-tl, .hud-tr, .hud-bl, .hud-br, .crosshair, .grapple-ret, .hitmarker, .dmg-ind, .message, .killfeed { mix-blend-mode: multiply; }
-#hud.nogame .hud-tl, #hud.nogame .hud-tr, #hud.nogame .hud-bl, #hud.nogame .hud-br, #hud.nogame .crosshair, #hud.nogame .grapple-ret, #hud.nogame .killfeed { display: none; }
+.hud-tl, .hud-tr, .hud-bl, .hud-br, .crosshair, .grapple-ret, .hitmarker, .dmg-ind, .message, .killfeed, .training-target { mix-blend-mode: multiply; }
+#hud.nogame .hud-tl, #hud.nogame .hud-tr, #hud.nogame .hud-bl, #hud.nogame .hud-br, #hud.nogame .crosshair, #hud.nogame .grapple-ret, #hud.nogame .killfeed, #hud.nogame .training-target { display: none; }
 .hud-tl { position: absolute; left: 9%; top: 3%; font-size: 30px; transform: rotate(-1.5deg); }
 .hud-tr { position: absolute; right: 4%; top: 3%; text-align: right; font-size: 30px; transform: rotate(1deg); }
 .hud-bl { position: absolute; left: 9%; bottom: 5%; }
@@ -72,6 +72,9 @@ canvas#c { position: fixed; inset: 0; width: 100vw; height: 100vh; display: bloc
 .bossbar.show { display: block; mix-blend-mode: multiply; }
 .bar.big { width: 420px; height: 20px; margin-top: 4px; }
 .fill.red { background: repeating-linear-gradient(-55deg, var(--red) 0 3px, transparent 3px 7px); }
+.training-target { position: absolute; left: 50%; top: 14%; width: 300px; margin-left: -150px; text-align: center; font-size: 20px; color: var(--ink); }
+.training-target .bar { margin-top: 4px; width: 300px; height: 10px; border: 2px solid var(--ink); border-radius: 10px; overflow: hidden; background: rgba(250,248,238,.8); }
+.training-target .fill { height: 100%; width: 100%; background: var(--red); }
 .tip { position: absolute; left: 0; right: 0; bottom: 17%; text-align: center; font-size: 26px; color: var(--ink); opacity: 0; transition: opacity .4s; mix-blend-mode: multiply; }
 .tip.show { opacity: .9; }
 .tip b { color: var(--red); }
