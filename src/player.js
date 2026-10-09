@@ -2,7 +2,8 @@
 import * as THREE from 'three';
 import { makeBody } from './physics.js';
 import { makeInkMaterial, INK } from './render.js';
-import { Rifle, Shotgun, Sniper, Katana } from './weapons.js';
+import { createWeapon } from './weapons.js';
+import { DEFAULT_LOADOUT, normalizeLoadout } from './loadout.js';
 // the dome shell and anything else flagged this way cannot be hooked
 const NO_GRAPPLE = (b) => !!b.data.noGrapple;
 const STAM_FIRE = 0.09, STAM_DRAIN = 0.08, STAM_GROUND = 0.4, STAM_AIR = 0.2, STAM_MIN = 0.18, STAM_PAUSE = 0.5, PARRY_WINDOW = 0.55;
@@ -21,9 +22,9 @@ export class Player {
     this.eye = new THREE.Vector3(); this.center = new THREE.Vector3(); this.forward = new THREE.Vector3(0, 0, -1); this.right = new THREE.Vector3(1, 0, 0);
     this.speed = 0; this.hurtFx = 0; this.flashFx = 0; this.lastDamageT = 10;
     this.rig = new THREE.Group(); this.camera.add(this.rig); ctx.scene.add(this.camera);
-    this.weapons = [new Rifle(ctx), new Shotgun(ctx), new Sniper(ctx), new Katana(ctx)]; this.katanaIndex = 3;
-    for (const w of this.weapons) { this.rig.add(w.root); if (w.isGun) w.startReserve = w.reserve; }
-    this.weaponIndex = 0; this.weapon = this.weapons[0]; this.weapon.equip(); this.returnT = 0; this.prevWeaponIndex = 0;
+    this.weapons = []; this.loadout = []; this.katanaIndex = -1;
+    this.weaponIndex = 0; this.weapon = null; this.returnT = 0; this.prevWeaponIndex = 0;
+    this.setLoadout(ctx.loadout || DEFAULT_LOADOUT, ctx.weaponRegistry, true);
     this.recoilPitch = new Spring(190, 17); this.recoilYaw = new Spring(190, 17); this.fovKick = new Spring(220, 14); this.landDip = new Spring(170, 15);
     this.roll = 0; this.fov = 82; this.bobPhase = 0; this.bobAmt = 0; this.stepDist = 0; this.eyeH = EYE_STAND;
     this.crouching = false; this.sliding = false; this.slideT = 0; this.coyote = 0; this.jumpBuffer = 0; this.wallTouch = 9; this.wallN = new THREE.Vector3(); this.wallJumpCd = 0; this.mantleCd = 0;
@@ -45,8 +46,27 @@ export class Player {
     for (const w of this.weapons) if (w.isGun) { w.mag = w.magSize; w.reserve = w.startReserve; w.reloading = false; w.pumpT = 0; }
     this.switchTo(0, true); this.rig.visible = true; this.eyeH = EYE_STAND; this.grenades = 3; this.clearNades();
   }
+  setLoadout(loadout, registry, silent = false) {
+    const next = normalizeLoadout(loadout || DEFAULT_LOADOUT, registry);
+    for (const w of this.weapons) {
+      this.rig.remove(w.root);
+      w.root.traverse((part) => {
+        if (part.geometry) part.geometry.dispose();
+        if (part.material) for (const material of Array.isArray(part.material) ? part.material : [part.material]) material.dispose();
+      });
+    }
+    this.loadout = next;
+    this.weapons = next.map((id) => createWeapon(this.ctx, id));
+    this.katanaIndex = this.weapons.findIndex((w) => w.kind === 'katana');
+    if (this.katanaIndex < 0) this.katanaIndex = this.weapons.findIndex((w) => w.category === 'melee');
+    for (const w of this.weapons) { this.rig.add(w.root); if (w.isGun) w.startReserve = w.reserve; }
+    this.weaponIndex = Math.min(this.weaponIndex || 0, this.weapons.length - 1);
+    this.weapon = this.weapons[this.weaponIndex]; this.weapon.equip();
+    if (!silent) this.ctx.hud.setWeapon(this.weapon.name, this.weapon.hint);
+  }
   clearNades() { for (const n of this.nades) this.ctx.scene.remove(n.mesh); this.nades.length = 0; }
-  get isBlocking() { return this.weapon.kind === 'katana' && this.weapon.blocking; }
+  get isMelee() { return this.weapon && this.weapon.category === 'melee'; }
+  get isBlocking() { return this.isMelee && this.weapon.blocking; }
   aimDir(spread = 0) { const d = this.forward.clone(); if (spread > 0) { d.addScaledVector(this.right, rand(-spread, spread)); d.y += rand(-spread, spread); d.normalize(); } return d; }
   recoil(p, y) { this.pitch = clamp(this.pitch + p * 0.55, -1.5, 1.5); this.recoilPitch.kick(p * 22); this.recoilYaw.kick(y * 30); }
   kickFov(v) { this.fovKick.kick(v * 30); }
@@ -59,7 +79,7 @@ export class Player {
     if (i < 0 || i >= this.weapons.length) return; if (i === this.weaponIndex && !silent) return;
     if (this.weapon.kind !== 'katana') this.prevWeaponIndex = this.weaponIndex;
     this.weapon.unequip(); this.weaponIndex = i; this.weapon = this.weapons[i]; this.weapon.equip(); if (!silent) audio.switchWeapon();
-    this.ctx.hud.setWeapon(this.weapon.name, this.weapon.hint); this.ctx.hud.setCrosshairMode(this.weapon.kind === 'katana' ? 'katana' : '');
+    this.ctx.hud.setWeapon(this.weapon.name, this.weapon.hint); this.ctx.hud.setCrosshairMode(this.isMelee ? 'katana' : '');
   }
   addAmmoAll(frac = 0.5) { for (const w of this.weapons) if (w.isGun) w.addAmmo(Math.round(w.maxReserve * frac)); }
   takeDamage(amount, fromPos) {
@@ -224,8 +244,8 @@ export class Player {
     if (inp.pressed('nextWeapon')) this.switchTo((this.weaponIndex + 1) % this.weapons.length);
     if (inp.pressed('prevWeapon')) this.switchTo((this.weaponIndex + this.weapons.length - 1) % this.weapons.length);
     const st = this._weaponState(sprinting, aiming, hs2);
-    if (inp.pressed('melee') && this.weapon.kind !== 'katana') { this.switchTo(this.katanaIndex); this.returnT = 0.85; this.weapons[this.katanaIndex].startSlash(st); st.meleePressed = false; }
-    if (this.returnT > 0) { if (this.weapon.kind === 'katana' && (st.firePressed || st.aim || st.meleePressed)) this.returnT = 0; else { this.returnT -= dt; if (this.returnT <= 0) this.switchTo(this.prevWeaponIndex); } }
+    if (inp.pressed('melee') && !this.isMelee) { this.switchTo(this.katanaIndex); this.returnT = 0.85; this.weapons[this.katanaIndex].startSlash(st); st.meleePressed = false; }
+    if (this.returnT > 0) { if (this.isMelee && (st.firePressed || st.aim || st.meleePressed)) this.returnT = 0; else { this.returnT -= dt; if (this.returnT <= 0) this.switchTo(this.prevWeaponIndex); } }
     this.firing = st.fire && this.weapon.isGun;
     this.weapon.animate(dt, st);
     ctx.hud.setAds(this.weapon.isGun && this.weapon.aimAmt > 0.55);
@@ -307,7 +327,7 @@ export class Player {
   }
   _weaponState(sprinting, aiming, hs) {
     const inp = this.ctx.input, b = this.body;
-    return { fire: inp.down('fire'), firePressed: inp.pressed('fire'), aim: aiming || (inp.down('aim') && this.weapon.kind === 'katana'), reloadPressed: inp.pressed('reload'), meleePressed: inp.pressed('melee') && this.weapon.kind === 'katana',
+    return { fire: inp.down('fire'), firePressed: inp.pressed('fire'), aim: aiming || (inp.down('aim') && this.isMelee), reloadPressed: inp.pressed('reload'), meleePressed: inp.pressed('melee') && this.isMelee,
       sprinting, grounded: b.onGround, speed: hs, sliding: this.sliding, lookDelta: inp.look, strafe: this._mv.x, bobPhase: this.bobPhase, bobAmt: this.bobAmt, landDip: clamp(-this.landDip.value * 0.08, -0.5, 0.5), slideTilt: this.sliding ? 1 : 0, blockFire: !this.alive };
   }
   _startSlide(hs) {

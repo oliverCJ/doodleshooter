@@ -368,3 +368,27 @@ export class Katana extends ViewModel {
     }
   }
 }
+
+// The registry is the extension point for new weapons; gameplay code only needs a stable id.
+export const WEAPON_REGISTRY = {
+  rifle: { id: 'rifle', name: '步枪', deathName: '步枪', category: 'gun', prop: 'rifle', tags: ['automatic', 'mid-range'], create: (ctx) => new Rifle(ctx) },
+  shotgun: { id: 'shotgun', name: '霰弹枪', deathName: '霰弹枪', category: 'gun', prop: 'shotgun', tags: ['shotgun', 'close-range'], create: (ctx) => new Shotgun(ctx) },
+  sniper: { id: 'sniper', name: '狙击枪', deathName: '狙击枪', category: 'gun', prop: 'sniper', tags: ['sniper', 'long-range'], create: (ctx) => new Sniper(ctx) },
+  revolver: { id: 'revolver', name: '左轮手枪', deathName: '左轮手枪', category: 'gun', prop: 'pistol', tags: ['handgun', 'precision'], create: (ctx) => new Revolver(ctx) },
+  katana: { id: 'katana', name: '太刀', deathName: '太刀', category: 'melee', prop: 'blade', tags: ['blade', 'parry'], create: (ctx) => new Katana(ctx) },
+};
+
+export const WEAPON_IDS = Object.keys(WEAPON_REGISTRY);
+
+export function createWeapon(ctx, id) {
+  const entry = WEAPON_REGISTRY[id];
+  if (!entry) throw new Error(`unknown weapon: ${id}`);
+  const weapon = entry.create(ctx);
+  weapon.id = id;
+  weapon.category = entry.category;
+  return weapon;
+}
+
+export function weaponMeta(id) {
+  return WEAPON_REGISTRY[id] || null;
+}

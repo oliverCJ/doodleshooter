@@ -11,6 +11,8 @@ import { Effects } from './effects.js';
 import { EnemyManager, BOSSES } from './enemies.js';
 import { Player } from './player.js';
 import { RemotePlayer, encodeLocal } from './players.js';
+import { WEAPON_REGISTRY, WEAPON_IDS, weaponMeta } from './weapons.js';
+import { LOADOUT_SLOTS, normalizeLoadout, readLoadout, serializeLoadout, writeLoadout, validateLoadout } from './loadout.js';
 import { Net } from './net.js';
 import { HUD, CONTROLS_HTML } from './hud.js';
 import { audio } from './audio.js';
@@ -38,7 +40,8 @@ const setArena = (on) => setLevel(knownMap(net.active ? (lobby.map || mapKey) : 
 const input = new Input(canvas);
 const hud = new HUD(document.getElementById('hud'));
 const effects = new Effects(R.scene, world);
-const ctx = { scene: R.scene, camera: R.camera, world, level, nav, input, hud, effects, audio, renderer: R };
+let loadout = readLoadout(localStorage, WEAPON_REGISTRY);
+const ctx = { scene: R.scene, camera: R.camera, world, level, nav, input, hud, effects, audio, renderer: R, weaponRegistry: WEAPON_REGISTRY, loadout };
 
 // ---------------- persistent bits ----------------
 let best = Number(localStorage.getItem('doodle_best') || 0);
@@ -363,8 +366,8 @@ function updateFocus(dt) {
 }
 
 // ---------------- free for all: spawning, death, scoring ----------------
-const HOW = { rifle: '步枪', shotgun: '霰弹枪', sniper: '狙击枪', katana: '太刀', grenade: '手雷', deflect: '自己的子弹' };
-const howWord = (src) => HOW[src] || null;
+const HOW = { grenade: '手雷', deflect: '自己的子弹' };
+const howWord = (src) => HOW[src] || weaponMeta(src)?.deathName || null;
 const spawnSpots = () => (level.arenaSpawns && level.arenaSpawns.length ? level.arenaSpawns : level.spawns);
 function arenaSpawn() {
   const spots = spawnSpots(); const others = [...remote.values()].filter((r) => r.alive && r.root && r.root.visible);
@@ -433,7 +436,7 @@ function addRemote(id, name) {
   remote.set(id, rp); return rp;
 }
 function removeRemote(id) { const r = remote.get(id); if (r) { r.dispose(); remote.delete(id); } lobby.players.delete(id); scores.delete(id); }
-function lobbyRows() { return [...lobby.players.entries()].map(([id, p]) => ({ id, name: p.name })); }
+function lobbyRows() { return [...lobby.players.entries()].map(([id, p]) => ({ id, name: p.name, loadout: serializeLoadout(p.loadout || loadout, WEAPON_REGISTRY) })); }
 function broadcastLobby() { net.send('lobby', { players: lobbyRows(), hostId: net.id, isPublic: lobby.isPublic, map: lobby.map || mapKey, shown: net.aliasCode || net.code }); renderLobby(); }
 const inMatch = () => ['play', 'dying', 'over'].includes(game.state);
 net.onPeerLeave = (id) => { const nm = (lobby.players.get(id) || {}).name; removeRemote(id); broadcastLobby(); if (inMatch()) { hud.kill((nm || '某人') + ' 离开了', 0); sendScores(); } };
@@ -463,7 +466,7 @@ async function _migrateHost() {
   } else {
     await sleep(1200);
     const deadline = performance.now() + 20000; let joined = false;
-    while (!joined && performance.now() < deadline) { try { await net.join(code, { name: myName, prev: myId }); joined = true; } catch (e) { await sleep(1200); } }
+    while (!joined && performance.now() < deadline) { try { await net.join(code, { name: myName, loadout, prev: myId }); joined = true; } catch (e) { await sleep(1200); } }
     if (!joined) { leaveOnline('房主离开，对局已丢失'); return; }
     lobby.code = code; if (!wasInMatch) { game.state = 'lobby'; screen = 'lobby'; showStart(); }
   }
@@ -473,13 +476,15 @@ net.hostName = myName;
 net.onPeerJoin = (from, meta) => {
   const name = String(meta && meta.name || 'doodle').slice(0, 14);
   if (meta && meta.prev && meta.prev !== from) { const sc = scores.get(meta.prev); if (sc) { scores.delete(meta.prev); scores.set(from, sc); } const r = remote.get(meta.prev); if (r) r.dispose(); remote.delete(meta.prev); lobby.players.delete(meta.prev); if (lobby.order) lobby.order = lobby.order.filter((id) => id !== meta.prev); }
-  lobby.players.set(from, { name }); addRemote(from, name); broadcastLobby();
+  const peerLoadout = normalizeLoadout(meta && meta.loadout, WEAPON_REGISTRY);
+  lobby.players.set(from, { name, loadout: peerLoadout });
+  const remotePlayer = addRemote(from, name); remotePlayer.setLoadout(peerLoadout, WEAPON_REGISTRY); broadcastLobby();
   if (game.state === 'play' || game.state === 'dying') { if (!scores.has(from)) scores.set(from, { name, kills: 0, deaths: 0 }); net.sendTo(from, 'start', { late: true, spawn: farthestSpawnIndex(), map: lobby.map || mapKey, broken: level.breakables.filter((b) => !b.alive).map((b) => b.id) }); sendScores(); hud.kill(name + ' 加入了', 0); }
 };
 net.on('lobby', (d) => {
   lobby.hostId = d.hostId; lobby.isPublic = !!d.isPublic; lobby.code = net.code; lobby.shown = d.shown || net.code; if (d.map) lobby.map = knownMap(d.map); lobby.order = d.players.map((p) => p.id); lobby.players.clear();
-  for (const p of d.players) lobby.players.set(p.id, { name: p.name });
-  for (const p of d.players) if (p.id !== net.id) addRemote(p.id, p.name);
+  for (const p of d.players) lobby.players.set(p.id, { name: p.name, loadout: normalizeLoadout(p.loadout, WEAPON_REGISTRY) });
+  for (const p of d.players) if (p.id !== net.id) { const remotePlayer = addRemote(p.id, p.name); remotePlayer.setLoadout(p.loadout, WEAPON_REGISTRY); }
   for (const id of [...remote.keys()]) if (!lobby.players.has(id)) removeRemote(id);
   if (inMatch()) { for (const p of d.players) if (!scores.has(p.id)) scores.set(p.id, { name: p.name, kills: 0, deaths: 0 }); refreshScoreHud(); }
   renderLobby();
@@ -567,16 +572,16 @@ async function createLobby(isPublic) {
   setStatus('正在创建大厅…');
   try { await net.host({ isPublic }); }
   catch (err) { setStatus(friendlyError(err)); unlockButtons(); return; }
-  lobby.isPublic = isPublic; lobby.map = mapKey; lobby.players.clear(); lobby.players.set(net.id, { name: myName }); lobby.hostId = net.id; lobby.status = '';
+  lobby.isPublic = isPublic; lobby.map = mapKey; lobby.players.clear(); lobby.players.set(net.id, { name: myName, loadout: loadout.slice() }); lobby.hostId = net.id; lobby.status = '';
   game.state = 'lobby'; screen = 'lobby'; showStart();
 }
 async function joinLobby(code) {
   setStatus('正在连接…');
-  try { await net.join(code, { name: myName }); } catch (err) { setStatus(friendlyError(err)); unlockButtons(); return; }
+  try { await net.join(code, { name: myName, loadout }); } catch (err) { setStatus(friendlyError(err)); unlockButtons(); return; }
   lobby.isPublic = net.isPublic; lobby.status = ''; game.state = 'lobby'; screen = 'lobby'; showStart();
 }
 async function quickPlay() {
-  try { await net.quickJoin({ name: myName }, setStatus); lobby.isPublic = true; lobby.status = ''; game.state = 'lobby'; screen = 'lobby'; showStart(); return; }
+  try { await net.quickJoin({ name: myName, loadout }, setStatus); lobby.isPublic = true; lobby.status = ''; game.state = 'lobby'; screen = 'lobby'; showStart(); return; }
   catch (err) { if (!/no open public/.test(String(err.message))) { setStatus(friendlyError(err)); unlockButtons(); return; } }
   setStatus('暂无开放的大厅 · 正在为你开一个公开大厅…');
   await createLobby(true);
@@ -625,10 +630,35 @@ function mapHTML(sel, canPick) { if (LEVELS.length < 2) return ''; return `<div 
 function wireMap(onPick) { const box = hud.el.panel.querySelector('#mapsel'); if (!box) return; box.addEventListener('click', (e) => { e.stopPropagation(); const b = e.target.closest('.mapbtn'); if (b && !b.disabled) onPick(b.dataset.map); }); }
 const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]);
 
+function loadoutHTML() {
+  const valid = validateLoadout(loadout, WEAPON_REGISTRY);
+  return `<div class="loadout" id="loadout"><span>武器配置</span>${LOADOUT_SLOTS.map((slot, i) => {
+    const current = loadout[i];
+    const options = WEAPON_IDS.filter((id) => slot.accepts.includes(WEAPON_REGISTRY[id].category) && !loadout.some((selected, j) => j !== i && selected === id));
+    return `<label>${slot.name}<select data-slot="${i}">${options.map((id) => `<option value="${id}" ${id === current ? 'selected' : ''}>${WEAPON_REGISTRY[id].name}</option>`).join('')}</select></label>`;
+  }).join('')}<i id="loadoutMsg">${valid.ok ? '' : esc(valid.reason)}</i></div>`;
+}
+
+function wireLoadout() {
+  const box = hud.el.panel.querySelector('#loadout'); if (!box) return;
+  box.addEventListener('click', (e) => e.stopPropagation()); box.addEventListener('keydown', (e) => e.stopPropagation());
+  box.addEventListener('change', (e) => {
+    const sel = e.target.closest('select[data-slot]'); if (!sel) return;
+    const next = loadout.slice(); next[Number(sel.dataset.slot)] = sel.value;
+    const valid = validateLoadout(next, WEAPON_REGISTRY);
+    const msg = box.querySelector('#loadoutMsg'); if (msg) msg.textContent = valid.reason;
+    if (!valid.ok) return;
+    loadout = writeLoadout(localStorage, WEAPON_REGISTRY, next);
+    ctx.loadout = loadout;
+    player.setLoadout(loadout, WEAPON_REGISTRY, true);
+    showStart();
+  });
+}
+
 function mainHTML() {
   return `<h1>涂鸦街区</h1><h2>一款涂鸦风生存射击游戏</h2>
     <div class="mainbtns"><button type="button" class="start" id="soloBtn">开始游戏<i>单人 · 抵御一波波敌人</i></button><button type="button" id="onlineBtn">在线对战<i>自由混战 · 最多 10 名玩家</i></button></div>
-    ${mapHTML(mapKey, true)}${CONTROLS_HTML}${settingsHTML()}${checkpointHTML()}${best ? `<div class="beststat">最高分：${best}</div>` : ''}`;
+    ${mapHTML(mapKey, true)}${loadoutHTML()}${CONTROLS_HTML}${settingsHTML()}${checkpointHTML()}${best ? `<div class="beststat">最高分：${best}</div>` : ''}`;
 }
 function onlineHTML() {
   return `<h1>在线对战</h1><h2>自由混战 · 先到 ${FFA_TARGET} 杀 · 最多 10 名玩家</h2>
@@ -693,7 +723,7 @@ function showStart() {
   hud.showScreen(html);
   const p = hud.el.panel;
   if (screen === 'main') {
-    wireSettings(); wireCheckpoints((w) => beginAtWave(w)); wireMap((k) => { mapKey = k; localStorage.setItem('doodle_map', k); showStart(); });
+    wireLoadout(); wireSettings(); wireCheckpoints((w) => beginAtWave(w)); wireMap((k) => { mapKey = k; localStorage.setItem('doodle_map', k); showStart(); });
     p.querySelector('#soloBtn').addEventListener('click', (e) => { e.stopPropagation(); begin(); });
     p.querySelector('#onlineBtn').addEventListener('click', (e) => { e.stopPropagation(); screen = 'online'; showStart(); });
   } else wireOnline();
