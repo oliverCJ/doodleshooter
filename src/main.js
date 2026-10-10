@@ -15,6 +15,7 @@ import { RemotePlayer, encodeLocal } from './players.js';
 import { WEAPON_REGISTRY, WEAPON_IDS, weaponMeta } from './weapons.js';
 import { LOADOUT_SLOTS, normalizeLoadout, readLoadout, serializeLoadout, writeLoadout, validateLoadout } from './loadout.js';
 import { Net } from './net.js';
+import { LAN_SIGNALING, PUBLIC_SIGNALING, checkLanSignaling, readPublicSignalingEnabled, writePublicSignalingEnabled } from './networkConfig.js';
 import { HUD, CONTROLS_HTML } from './hud.js';
 import { audio } from './audio.js';
 import { rand, choose, clamp } from './util.js';
@@ -78,6 +79,8 @@ const remote = new Map();      // peer id -> RemotePlayer
 const lobby = { players: new Map(), hostId: null, isPublic: true, status: '', code: '', mapConfig: null, map: null };
 const scores = new Map();      // peer id -> { name, kills, deaths }
 let screen = 'main';           // which start-screen panel is showing: main | online | lobby
+let publicSignalingEnabled = readPublicSignalingEnabled(localStorage);
+let lanSignalingAvailable = false;
 window.__game = { ctx, game, player, enemies, training, nav, world, level, hud, effects, input, net, remote, lobby, scores };
 
 // anything a bullet or a blade can hit besides enemies
@@ -479,6 +482,26 @@ async function _migrateHost() {
 }
 net.on('refused', (d) => leaveOnline(d.reason));
 net.hostName = myName;
+net.setMode(PUBLIC_SIGNALING);
+net.on('diagnostic', (event) => {
+  console.warn('[network diagnostic]', {
+    stage: event.stage,
+    mode: event.mode,
+    type: event.type,
+    peer: event.peer || null,
+    state: event.state || null,
+    errorType: event.errorType || null,
+    message: event.message || null,
+    iceServers: event.options?.iceServers,
+  });
+});
+net.on('iceStateChanged', ({ state }) => {
+  if (net.mode === LAN_SIGNALING && state === 'failed') setStatus('局域网直连失败 · 请检查两台电脑是否在同一 Wi-Fi，且路由器未开启客户端隔离');
+  console.info(`[network] ${net.mode} ICE state: ${state}`);
+});
+net.on('connectionError', ({ message, metadata }) => {
+  if (net.mode === LAN_SIGNALING && !(metadata && metadata.probe)) console.warn(`[network] LAN peer connection failed: ${message}`);
+});
 net.onPeerJoin = (from, meta) => {
   const name = String(meta && meta.name || 'doodle').slice(0, 14);
   if (meta && meta.prev && meta.prev !== from) { const sc = scores.get(meta.prev); if (sc) { scores.delete(meta.prev); scores.set(from, sc); } const r = remote.get(meta.prev); if (r) r.dispose(); remote.delete(meta.prev); lobby.players.delete(meta.prev); if (lobby.order) lobby.order = lobby.order.filter((id) => id !== meta.prev); }
@@ -589,12 +612,13 @@ async function joinLobby(code) {
 async function quickPlay() {
   try { await net.quickJoin({ name: myName, loadout }, setStatus); lobby.isPublic = true; lobby.status = ''; game.state = 'lobby'; screen = 'lobby'; showStart(); return; }
   catch (err) { if (!/no open public/.test(String(err.message))) { setStatus(friendlyError(err)); unlockButtons(); return; } }
-  setStatus('暂无开放的大厅 · 正在为你开一个公开大厅…');
+  setStatus(`暂无开放的${net.mode === LAN_SIGNALING ? '局域网' : '公网'}大厅 · 正在为你开一个公开大厅…`);
   await createLobby(true);
 }
 function friendlyError(err) {
   const m = String(err && err.message || err || ''); if (!m) return '出了点问题';
   if (/networking library/.test(m)) return '无法加载联机库 · 请检查网络并刷新页面';
+  if (/Negotiation of connection|could not connect|connection failed/i.test(m)) return net.mode === LAN_SIGNALING ? '局域网直连失败 · 请检查两台电脑是否在同一 Wi-Fi，且路由器未开启客户端隔离' : '无法建立玩家直连 · 你们中可能有人处于阻止直连的网络';
   if (/timed out|signalling/.test(m)) return '无法连接匹配服务器 · 请检查你的网络';
   if (/no lobby with that code/.test(m)) return '找不到该代码对应的大厅 · 和朋友核对一下代码';
   if (/no answer/.test(m)) return '找到了大厅但无法连接 · 你们中可能有人处于阻止直连的网络';
@@ -667,14 +691,28 @@ function mainHTML() {
     ${mapHTML(mapConfig, true)}${loadoutHTML()}${CONTROLS_HTML}${settingsHTML()}${checkpointHTML()}${best ? `<div class="beststat">最高分：${best}</div>` : ''}`;
 }
 function onlineHTML() {
+  const isLan = onlineTab === 'lan';
+  const mode = isLan ? 'lan' : 'public';
+  const disabled = isLan ? (lanSignalingAvailable ? '' : 'disabled') : (publicSignalingEnabled ? '' : 'disabled');
+  const publicHint = publicSignalingEnabled ? '使用公网 PeerJS 信令，可快速匹配或创建公开大厅' : '公网联机已关闭，仅使用局域网信令';
+  const lanHint = lanSignalingAvailable ? '使用本机 /peerjs 局域网信令，适合无公网环境' : '当前服务未启用局域网信令，请房主使用 npm run serve 启动';
+  const hint = isLan ? lanHint : publicHint;
+  const title = isLan ? '局域网对战' : '公网对战';
+  const quickText = isLan ? '快速匹配局域网' : '快速匹配公网';
+  const createText = isLan ? '创建局域网大厅' : '创建公网大厅';
+  const codeLabel = isLan ? '局域网大厅代码' : '公网大厅代码';
+  const joinText = isLan ? '加入局域网' : '加入公网';
   return `<h1>在线对战</h1><h2>自由混战 · 先到 ${FFA_TARGET} 杀 · 最多 10 名玩家</h2>
     <div class="online" id="online">
       <div class="row"><span>你的昵称</span><input type="text" class="namebox" id="setName" maxlength="14" value="${esc(myName)}"></div>
-      <div class="row"><button type="button" class="big" id="quickBtn">快速匹配</button><span class="hint">自动加入开放的公开大厅；没有的话就为你开一个</span></div>
-      <div class="row split"><span>或</span></div>
-      <div class="row"><button type="button" id="createBtn">创建大厅</button><div class="radio"><label><input type="radio" name="vis" value="public" ${lobby.isPublic ? 'checked' : ''}> 公开</label><label><input type="radio" name="vis" value="private" ${lobby.isPublic ? '' : 'checked'}> 私密 · 仅好友</label></div></div>
-      <div class="row"><span>有大厅代码？</span><input type="text" id="codeBox" placeholder="代码" maxlength="5" autocomplete="off"><button type="button" id="joinBtn">加入</button></div>
-      <div class="lobbylist" id="lobbylist"><div class="row"><span>公开大厅</span><button type="button" class="alt" id="refreshBtn">刷新</button></div><div class="rows" id="lobbyRows">${lobbyListHTML()}</div></div>
+      <div class="row"><label><input type="checkbox" id="publicSignalToggle" ${publicSignalingEnabled ? 'checked' : ''}> 允许公网联机</label><span class="hint">关闭后不会连接公网 PeerJS 或扫描公网公开大厅</span></div>
+      <div class="nettabs"><button type="button" id="lanTab" class="${onlineTab === 'lan' ? 'on' : ''}">局域网对战</button><button type="button" id="publicTab" class="${onlineTab === 'public' ? 'on' : ''}">公网对战</button></div>
+      <div class="netpanel"><div class="row"><span>${title}</span></div><div class="hint">${hint}</div>
+        <div class="row"><button type="button" class="big" id="quickBtn" ${disabled}>${quickText}</button><span class="hint">自动加入开放的公开大厅；没有的话就为你开一个</span></div>
+        <div class="row"><button type="button" id="createBtn" ${disabled}>${createText}</button><div class="radio"><label><input type="radio" name="vis" value="public" ${lobby.isPublic ? 'checked' : ''} ${disabled}> 公开</label><label><input type="radio" name="vis" value="private" ${lobby.isPublic ? '' : 'checked'} ${disabled}> 私密 · 仅好友</label></div></div>
+        <div class="row"><span>${codeLabel}</span><input type="text" id="codeBox" placeholder="代码" maxlength="5" autocomplete="off" ${disabled}><button type="button" id="joinBtn" ${disabled}>${joinText}</button></div>
+        <div class="lobbylist" id="lobbylist"><div class="row"><span>公开大厅</span><button type="button" class="alt" id="refreshBtn" ${disabled}>刷新</button></div><div class="rows" id="lobbyRows">${isLan || publicSignalingEnabled ? lobbyListHTML(mode) : '<div class="hint">公网联机已关闭</div>'}</div></div>
+      </div>
       <div class="status" id="status">${esc(lobby.status || '')}</div>
       ${lobby.rejoinCode ? `<div class="row"><button type="button" class="big" id="rejoinBtn">重新加入 ${esc(lobby.rejoinCode)}</button></div>` : ''}
       <div class="row"><button type="button" class="alt" id="backBtn">返回</button></div>
@@ -692,35 +730,62 @@ function lobbyHTML() {
       <div class="status" id="status">${esc(lobby.status || '')}</div><div class="hint">任何人都可以开始 · ${n < 2 ? '开局后仍可中途加入' : n + ' 名玩家已就位'}</div>
     </div>`;
 }
-let lobbyList = null, listBusy = false;
-function lobbyListHTML() {
-  if (listBusy) return '<div class="hint">正在查找…</div>';
-  if (!lobbyList) return '<div class="hint">点击「刷新」查找开放的大厅</div>';
-  if (!lobbyList.length) return '<div class="hint">点击「快速匹配」即可加入大厅</div>';
-  return lobbyList.map((l) => `<div class="lobbyrow"><span class="code">${esc(l.code)}</span><span>${esc(l.hostName || '某人')} 的大厅</span><span>${l.players}/${l.max}${l.inMatch ? ' · 对战中' : ''}</span>${l.full ? '<span class="status">已满</span>' : `<button type="button" data-join="${esc(l.code)}">加入</button>`}</div>`).join('');
+let onlineTab = 'lan';
+const lobbyLists = { public: null, lan: null };
+const lobbyListBusy = { public: false, lan: false };
+function lobbyListHTML(mode) {
+  if (lobbyListBusy[mode]) return '<div class="hint">正在查找…</div>';
+  const list = lobbyLists[mode];
+  if (!list) return '<div class="hint">点击「刷新」查找开放的大厅</div>';
+  if (!list.length) return '<div class="hint">点击「快速匹配」即可加入大厅</div>';
+  return list.map((l) => `<div class="lobbyrow"><span class="code">${esc(l.code)}</span><span>${esc(l.hostName || '某人')} 的大厅</span><span>${l.players}/${l.max}${l.inMatch ? ' · 对战中' : ''}</span>${l.full ? '<span class="status">已满</span>' : `<button type="button" data-join="${esc(l.code)}">加入</button>`}</div>`).join('');
 }
-async function refreshLobbies() {
-  if (listBusy || net.active) return; listBusy = true; const box = hud.el.panel.querySelector('#lobbyRows'); if (box) box.innerHTML = lobbyListHTML();
-  let err = null; try { lobbyList = await net.listLobbies({ name: myName }); } catch (e) { lobbyList = []; err = e; }
-  listBusy = false; const rows = hud.el.panel.querySelector('#lobbyRows'); if (rows) rows.innerHTML = err ? `<div class="hint">查找失败：${esc(friendlyError(err))}</div>` : lobbyListHTML();
+async function refreshLobbies(mode = onlineTab) {
+  if (lobbyListBusy[mode] || net.active) return; lobbyListBusy[mode] = true; const box = hud.el.panel.querySelector('#lobbyRows'); if (box && mode === onlineTab) box.innerHTML = lobbyListHTML(mode);
+  let err = null; try { if (mode === 'lan') useLanNetwork(); else usePublicNetwork(); lobbyLists[mode] = await net.listLobbies({ name: myName }); } catch (e) { lobbyLists[mode] = []; err = e; }
+  lobbyListBusy[mode] = false; const rows = hud.el.panel.querySelector('#lobbyRows'); if (rows && mode === onlineTab) rows.innerHTML = err ? `<div class="hint">查找失败：${esc(friendlyError(err))}</div>` : lobbyListHTML(mode);
+}
+async function refreshLanSignaling() {
+  lanSignalingAvailable = await checkLanSignaling();
+  return lanSignalingAvailable;
+}
+function usePublicNetwork() {
+  net.setMode(PUBLIC_SIGNALING);
+}
+function useLanNetwork() {
+  net.setMode(LAN_SIGNALING, location, { allowStun: publicSignalingEnabled });
+  console.info('[network] LAN PeerJS config', { host: net.peerOptions.host, port: net.peerOptions.port, path: net.peerOptions.path, iceServers: net.peerOptions.config.iceServers.length });
 }
 function wireOnline() {
   const box = hud.el.panel.querySelector('#online'); if (!box) return;
   box.addEventListener('click', (e) => e.stopPropagation()); box.addEventListener('keydown', (e) => e.stopPropagation());
   const q = (id) => box.querySelector('#' + id); wireName(box);
-  if (q('quickBtn')) q('quickBtn').addEventListener('click', () => { lockButtons(box); quickPlay(); });
-  if (q('createBtn')) q('createBtn').addEventListener('click', () => { lockButtons(box); createLobby(box.querySelector('input[name=vis]:checked').value === 'public'); });
-  if (q('joinBtn')) { q('joinBtn').addEventListener('click', () => { const c = q('codeBox').value.trim().toUpperCase(); if (!c) { setStatus('请输入好友给你的大厅代码'); return; } lockButtons(box); joinLobby(c); }); q('codeBox').addEventListener('keydown', (e) => { if (e.key === 'Enter') q('joinBtn').click(); }); }
+  if (q('publicSignalToggle')) q('publicSignalToggle').addEventListener('change', (e) => {
+    publicSignalingEnabled = writePublicSignalingEnabled(localStorage, e.target.checked);
+    lobbyLists.public = null;
+    showStart();
+  });
+  if (q('lanTab')) q('lanTab').addEventListener('click', () => { onlineTab = 'lan'; showStart(); });
+  if (q('publicTab')) q('publicTab').addEventListener('click', () => { onlineTab = 'public'; showStart(); });
+  const modeReady = () => {
+    if (onlineTab === 'lan' && !lanSignalingAvailable) { setStatus('当前服务未启用局域网信令，请房主使用 npm run serve 启动'); return false; }
+    if (onlineTab === 'public' && !publicSignalingEnabled) { setStatus('公网联机已关闭'); return false; }
+    if (onlineTab === 'lan') useLanNetwork(); else usePublicNetwork();
+    return true;
+  };
+  if (q('quickBtn')) q('quickBtn').addEventListener('click', () => { if (!modeReady()) return; lockButtons(box); quickPlay(); });
+  if (q('createBtn')) q('createBtn').addEventListener('click', () => { if (!modeReady()) return; lockButtons(box); createLobby(box.querySelector('input[name=vis]:checked').value === 'public'); });
+  if (q('joinBtn')) { q('joinBtn').addEventListener('click', () => { if (!modeReady()) return; const c = q('codeBox').value.trim().toUpperCase(); if (!c) { setStatus(onlineTab === 'lan' ? '请输入局域网大厅代码' : '请输入好友给你的公网大厅代码'); return; } lockButtons(box); joinLobby(c); }); q('codeBox').addEventListener('keydown', (e) => { if (e.key === 'Enter') q('joinBtn').click(); }); }
   if (q('rejoinBtn')) q('rejoinBtn').addEventListener('click', () => { const c = lobby.rejoinCode; lobby.rejoinCode = null; lockButtons(box); joinLobby(c); });
   if (q('backBtn')) q('backBtn').addEventListener('click', () => { lobby.status = ''; lobby.rejoinCode = null; screen = 'main'; showStart(); });
-  if (q('refreshBtn')) { q('refreshBtn').addEventListener('click', () => refreshLobbies()); if (!lobbyList && !listBusy) refreshLobbies(); }
-  if (q('lobbyRows')) q('lobbyRows').addEventListener('click', (e) => { const b = e.target.closest('button[data-join]'); if (b) { lockButtons(box); joinLobby(b.dataset.join); } });
+  if (q('refreshBtn')) { q('refreshBtn').addEventListener('click', () => { if (!modeReady()) return; refreshLobbies(onlineTab); }); if ((onlineTab === 'lan' ? lanSignalingAvailable : publicSignalingEnabled) && !lobbyLists[onlineTab] && !lobbyListBusy[onlineTab]) refreshLobbies(onlineTab); }
+  if (q('lobbyRows')) q('lobbyRows').addEventListener('click', (e) => { const b = e.target.closest('button[data-join]'); if (b) { if (!modeReady()) return; lockButtons(box); joinLobby(b.dataset.join); } });
   wireMap((config) => { if (net.isHost) { lobby.mapConfig = serializeMapConfig(config, LEVELS); lobby.map = lobby.mapConfig.key; broadcastLobby(); } });
   if (q('startBtn')) q('startBtn').addEventListener('click', () => { if (net.isHost) hostStart(); else { net.send('startreq', {}); setStatus('正在请求房主开始…'); } });
   if (q('leaveBtn')) q('leaveBtn').addEventListener('click', () => { lobby.rejoinCode = null; leaveOnline(''); });
 }
 function lockButtons(box) { for (const b of box.querySelectorAll('button')) if (b.id !== 'backBtn') b.disabled = true; }
-function unlockButtons() { const box = hud.el.panel.querySelector('#online'); if (box) for (const b of box.querySelectorAll('button')) b.disabled = false; }
+function unlockButtons() { showStart(); }
 function renderLobby() { if (game.state === 'lobby') showStart(); }
 function showStart() {
   hud.setGameplayVisible(false);
@@ -732,7 +797,7 @@ function showStart() {
     wireLoadout(); wireSettings(); wireCheckpoints((w) => beginAtWave(w)); wireMap((config) => { mapConfig = writeMapConfig(localStorage, LEVELS, config); showStart(); });
     p.querySelector('#soloBtn').addEventListener('click', (e) => { e.stopPropagation(); begin(); });
     p.querySelector('#trainingBtn').addEventListener('click', (e) => { e.stopPropagation(); beginTraining(); });
-    p.querySelector('#onlineBtn').addEventListener('click', (e) => { e.stopPropagation(); screen = 'online'; showStart(); });
+    p.querySelector('#onlineBtn').addEventListener('click', async (e) => { e.stopPropagation(); screen = 'online'; await refreshLanSignaling(); showStart(); });
   } else wireOnline();
 }
 function showPause() {

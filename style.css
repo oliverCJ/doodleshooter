@@ -185,6 +185,10 @@ canvas#c { position: fixed; inset: 0; width: 100vw; height: 100vh; display: bloc
 .online button:hover:not(:disabled) { filter: brightness(1.15); }
 .online input[type=text] { font: inherit; font-size: 26px; width: 150px; text-align: center; letter-spacing: 5px; text-transform: uppercase; color: var(--ink); border: 2.5px solid var(--ink); border-radius: 6px 9px 6px 8px; background: transparent; padding: 3px 6px; }
 .online input.namebox { letter-spacing: 0; text-transform: none; font-size: 22px; width: 180px; }
+.nettabs { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; }
+.nettabs button { color: var(--ink); background: transparent; }
+.nettabs button.on { color: var(--paper); background: var(--ink); }
+.netpanel { display: flex; flex-direction: column; gap: 8px; align-items: center; width: 100%; max-width: 560px; padding-top: 8px; border-top: 1.5px dashed rgba(26,48,192,.35); }
 .online .radio { display: flex; gap: 14px; font-size: 19px; }
 .online .radio label { display: flex; gap: 5px; align-items: center; cursor: pointer; }
 .online .status { min-height: 26px; font-size: 20px; color: var(--red); }

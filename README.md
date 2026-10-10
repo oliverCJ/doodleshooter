@@ -9,13 +9,36 @@ files: the paper, the ink outlines, the hatching, the enemies and the music are 
 
 ## Running it
 
-It is a static site, so any web server works. Locally:
+Recommended local game server:
 
 ```bash
-python3 serve.py 8910
+npm install
+npm run serve
 ```
 
-then open http://127.0.0.1:8910. On Vercel (or any static host) just deploy the folder as is.
+The Node server serves the game page and a local PeerJS signalling endpoint. It prints a LAN URL such as `http://192.168.1.23:8910`. Other players on the same LAN open that URL; they do not need to clone the repository or start their own server.
+
+在线对战页使用“局域网对战 / 公网对战”两个 Tab。公网联机开关位于公共区域，关闭后只禁用公网快速匹配、创建、加入和公网公开大厅刷新，不影响局域网对战。局域网对战使用本地信令和浏览器 WebRTC P2P，可以在无公网环境下创建公开或私密大厅、快速匹配局域网公开大厅、刷新局域网公开大厅，也可以输入大厅代码加入指定大厅。公网开关开启时，局域网 P2P 会额外使用 STUN 辅助发现候选地址；关闭时只使用局域网本地候选，保持离线。
+
+Docker uses the same Node LAN server:
+
+```bash
+docker compose up --build
+```
+
+It exposes `http://<host-lan-ip>:8910`, including the `/peerjs` signalling endpoint required for offline LAN multiplayer.
+
+Lightweight static-only fallback:
+
+```bash
+python3 serve.py --lan 8910
+```
+
+The Python server is useful for static page testing and public online play, but it does not provide offline LAN signalling. Use `npm run serve` for offline LAN multiplayer.
+
+If LAN devices cannot open the page, check that all devices are on the same network, macOS or system firewall allows incoming Node/Python connections, and the router has not enabled Wi-Fi client isolation.
+
+On Vercel or any static host, deploy the folder as is for public online play.
 
 ## Modes
 
@@ -25,8 +48,10 @@ then open http://127.0.0.1:8910. On Vercel (or any static host) just deploy the 
 
 Multiplayer is peer-to-peer over WebRTC (PeerJS), so it works from a static host with no game
 server. Under PLAY ONLINE you can Quick Play (joins an open public lobby, or opens one for you),
-create a public or private lobby, or join a friend's lobby with their five letter code. People can
-join a match already in progress. The host's browser keeps score; each player runs their own body.
+create a public or private lobby, refresh open lobby lists, or join a friend's lobby with their five
+letter code. LAN and public online play use separate lobby discovery, so a LAN public lobby is only
+matched by players using the same LAN game URL. People can join a match already in progress. The
+host's browser keeps score; each player runs their own body.
 
 ## Controls
 
