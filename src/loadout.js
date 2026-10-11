@@ -2,26 +2,26 @@
 export const LOADOUT_STORAGE_KEY = 'doodle_loadout';
 
 export const LOADOUT_SLOTS = [
-  { id: 'primary', name: '主武器', accepts: ['gun'] },
-  { id: 'melee', name: '近战武器', accepts: ['melee'] },
-  { id: 'secondary1', name: '副武器 1', accepts: ['gun', 'melee'] },
-  { id: 'secondary2', name: '副武器 2', accepts: ['gun', 'melee'] },
+  { id: 'primary', nameKey: 'loadout.slot.primary', accepts: ['gun'] },
+  { id: 'melee', nameKey: 'loadout.slot.melee', accepts: ['melee'] },
+  { id: 'secondary1', nameKey: 'loadout.slot.secondary1', accepts: ['gun', 'melee'] },
+  { id: 'secondary2', nameKey: 'loadout.slot.secondary2', accepts: ['gun', 'melee'] },
 ];
 
 export const DEFAULT_LOADOUT = ['rifle', 'katana', 'shotgun', 'sniper'];
 
 export function validateLoadout(loadout, registry) {
-  if (!Array.isArray(loadout) || loadout.length !== LOADOUT_SLOTS.length) return { ok: false, reason: '请选择 4 个武器槽位' };
+  if (!Array.isArray(loadout) || loadout.length !== LOADOUT_SLOTS.length) return { ok: false, reasonKey: 'loadout.error.needFourSlots' };
   const seen = new Set();
   for (let i = 0; i < LOADOUT_SLOTS.length; i++) {
     const id = loadout[i];
     const weapon = registry && registry[id];
-    if (!weapon) return { ok: false, reason: '包含未知武器' };
-    if (seen.has(id)) return { ok: false, reason: '不能重复选择同一把武器' };
+    if (!weapon) return { ok: false, reasonKey: 'loadout.error.unknownWeapon' };
+    if (seen.has(id)) return { ok: false, reasonKey: 'loadout.error.duplicateWeapon' };
     seen.add(id);
-    if (!LOADOUT_SLOTS[i].accepts.includes(weapon.category)) return { ok: false, reason: `${LOADOUT_SLOTS[i].name} 类型不匹配` };
+    if (!LOADOUT_SLOTS[i].accepts.includes(weapon.category)) return { ok: false, reasonKey: 'loadout.error.slotTypeMismatch', params: { slotKey: LOADOUT_SLOTS[i].nameKey } };
   }
-  return { ok: true, reason: '' };
+  return { ok: true, reasonKey: '' };
 }
 
 export function normalizeLoadout(value, registry) {
@@ -46,4 +46,3 @@ export function writeLoadout(storage, registry, loadout) {
   storage.setItem(LOADOUT_STORAGE_KEY, JSON.stringify(value));
   return value;
 }
-

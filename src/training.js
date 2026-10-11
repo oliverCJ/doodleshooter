@@ -57,7 +57,7 @@ export class TrainingManager {
     this.enabled = true;
     const defs = Array.isArray(level.trainingTargets) ? level.trainingTargets : [];
     for (const def of defs) this._spawn(def);
-    if (!defs.length) this.ctx.hud.tip('暂无训练靶', 2);
+    if (!defs.length) this.ctx.hud.tip(this.ctx.i18n ? this.ctx.i18n.t('training.noTargets') : 'training.noTargets', 2);
   }
 
   clear() {
@@ -74,7 +74,7 @@ export class TrainingManager {
     const target = {
       id: this.targets.length,
       type: def.type,
-      name: def.name || '训练靶',
+      name: def.nameKey && this.ctx.i18n ? this.ctx.i18n.t(def.nameKey) : def.name || (this.ctx.i18n ? this.ctx.i18n.t('training.defaultTarget') : 'training.defaultTarget'),
       hp: def.hp || 100,
       maxHp: def.hp || 100,
       basePos: new THREE.Vector3().fromArray(def.pos),
