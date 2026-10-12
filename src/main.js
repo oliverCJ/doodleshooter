@@ -23,6 +23,15 @@ import { createI18n } from './i18n.js';
 import { bindMainMenuTabs, renderMainMenu } from './screens/mainMenu.js';
 import { bindLobbyScreen, bindOnlineScreen, renderLobbyList, renderLobbyScreen, renderOnlineScreen } from './screens/onlineMenu.js';
 import { buildWavePlan } from './gameplay/waves.js';
+import {
+  applyPvpDeathScore,
+  applyPvpFallPenalty,
+  buildLocalDeathPayload,
+  canApplyIncomingPlayerDamage,
+  findPvpWinner,
+  resolveRemotePlayerHit,
+  sortPvpScores,
+} from './gameplay/pvpCombatRules.js';
 import { createLobbyActions } from './online/lobbyActions.js';
 import { audio } from './audio.js';
 import { rand, choose, clamp } from './util.js';
@@ -120,24 +129,24 @@ const _bc = new THREE.Vector3();
 ctx.playersInArc = (pos, dir, range, cosHalf) => { const out = []; for (const t of remote.values()) { if (!t.alive || !ctx.canHurt(t)) continue; _v.subVectors(t.center, pos); const d = _v.length(); if (d > range + 0.3) continue; if (d > 0.3 && _v.normalize().dot(dir) < cosHalf) continue; if (!world.hasLineOfSight(pos, t.center)) continue; out.push(t); } return out; };
 ctx.hitPlayer = (t, dmg, info) => {
   if (!ctx.canHurt(t) || !t.alive) return;
-  // a raised katana facing you parries a slash outright and turns some bullets aside
-  // the bullet met the blade itself: it glances off, and now and then comes straight back at you
-  if (info.part === 'blade') {
+  const facing = t.blocking ? _v.subVectors(player.center, t.center).normalize().dot(t.forward) : -1;
+  const result = resolveRemotePlayerHit({
+    target: { id: t.id, parryWindow: t.parryWindow },
+    hit: { part: info.part, source: info.source, damage: dmg, crit: info.crit, facingDot: facing },
+    random: Math.random(),
+  });
+  if (result.type === 'blade-deflect') {
     effects.strokeBurst(info.point, INK.ORANGE, 8, 6, { life: 0.22, size: 0.035 }); audio.shieldHit(t.center);
-    const ret = Math.random() < 0.4;
-    if (ret) {
+    if (result.reflected) {
       effects.tracer(info.point, player.eye, INK.RED, 0.03, 0.08); hud.tip(i18n.t('pvp.deflectedBack'), 0.9); input.rumble(0.5, 0.4, 90);
-      player.lastHitBy = t.id; player.lastHit = { from: t.center.toArray(), crit: false, amount: dmg * 0.6, src: 'deflect' }; player.takeDamage(dmg * 0.6, t.center);
+      player.lastHitBy = t.id; player.lastHit = { from: t.center.toArray(), crit: false, amount: result.reflectedDamage, src: 'deflect' }; player.takeDamage(result.reflectedDamage, t.center);
     } else hud.tip(i18n.t('pvp.deflectedAway'), 0.7);
-    net.sendTo(t.id, 'parry', { ret, by: net.id });
+    net.sendTo(t.id, 'parry', { ret: result.reflected, by: net.id });
     return;
   }
-  const facing = t.blocking ? _v.subVectors(player.center, t.center).normalize().dot(t.forward) : -1;
-  const frontHit = /^(head|torso|arm|fore)/.test(info.part || '');
-  // a slash is only parried by a guard that just came up and faces you
-  if (facing > 0.6 && frontHit && info.source === 'katana' && t.parryWindow) { effects.strokeBurst(info.point, INK.ORANGE, 10, 6, { life: 0.25, size: 0.04 }); audio.shieldHit(t.center); game.hitstop(0.08, 0.15); player.weapons[player.katanaIndex].cooldown = Math.max(player.weapons[player.katanaIndex].cooldown, 0.6); input.rumble(0.6, 0.3, 90); hud.tip(i18n.t('pvp.blocked'), 0.9); return; }
-  effects.blood(info.point, info.dir, clamp(0.4 + dmg / 80, 0.4, 1.6), { ink: INK.RED }); hud.hitmarker(false, info.crit); audio.hitEnemy(t.center); t.flash();
-  net.sendTo(t.id, 'pdmg', { amount: Math.round(dmg), from: player.center.toArray().map((v) => +v.toFixed(1)), by: net.id, crit: !!info.crit, src: info.source });
+  if (result.type === 'katana-parried') { effects.strokeBurst(info.point, INK.ORANGE, 10, 6, { life: 0.25, size: 0.04 }); audio.shieldHit(t.center); game.hitstop(0.08, 0.15); player.weapons[player.katanaIndex].cooldown = Math.max(player.weapons[player.katanaIndex].cooldown, 0.6); input.rumble(0.6, 0.3, 90); hud.tip(i18n.t('pvp.blocked'), 0.9); return; }
+  effects.blood(info.point, info.dir, clamp(0.4 + result.outgoingDamage / 80, 0.4, 1.6), { ink: INK.RED }); hud.hitmarker(false, info.crit); audio.hitEnemy(t.center); t.flash();
+  net.sendTo(t.id, 'pdmg', { amount: Math.round(result.outgoingDamage), from: player.center.toArray().map((v) => +v.toFixed(1)), by: net.id, crit: !!info.crit, src: info.source });
 };
 // a slash through another player's rope cuts it: their client drops the hook
 const _rp = new THREE.Vector3(), _rq = new THREE.Vector3();
@@ -386,25 +395,26 @@ function onLocalDeath() {
   if (!online()) { game.state = 'dying'; game.deathT = 0; return; }
   const killer = player.lastHitBy || null; const h = player.lastHit || {};
   const dir = h.from ? player.center.clone().sub(new THREE.Vector3().fromArray(h.from)).normalize().toArray().map((v) => +v.toFixed(2)) : null;
-  const how = killer ? howWord(h.src) : null;
-  net.broadcast('pdead', { killer, dir, over: !!(h.crit || h.amount >= 90 || h.src === 'katana'), how, crit: !!h.crit });
+  const payload = buildLocalDeathPayload({ killer, lastHit: h, dir, how: killer ? howWord(h.src) : null });
+  net.broadcast('pdead', payload);
   if (net.isHost) tallyDeath(net.id, killer);
   game.respawnT = RESPAWN; game.state = 'dying'; game.deathT = 0;
   const kn = killer && scores.get(killer) ? scores.get(killer).name : null;
-  hud.kill(kn ? i18n.t('pvp.erasedBy', { name: kn }) + (how ? ' · ' + how + (h.crit ? i18n.t('pvp.critSuffix') : '') : '') : i18n.t('pvp.erased'), 0);
+  hud.kill(kn ? i18n.t('pvp.erasedBy', { name: kn }) + (payload.how ? ' · ' + payload.how + (payload.crit ? i18n.t('pvp.critSuffix') : '') : '') : i18n.t('pvp.erased'), 0);
 }
 function respawnLocal() {
   player.reset(arenaSpawn()); player.name = myName; player.lastHitBy = null; player.lastHit = null; game.state = 'play'; player.shieldT = 2; hud.tip(i18n.t('pvp.respawnShield'), 1.6);
   effects.strokeBurst(player.center, INK.BLUE, 24, 6, { life: 0.5, size: 0.03 }); audio.spawn(player.center);
 }
 function tallyDeath(victim, killer) {
-  const v = scores.get(victim); if (v) v.deaths++;
-  if (killer && killer !== victim) { const k = scores.get(killer); if (k) k.kills++; }
+  replaceScores(applyPvpDeathScore(scoreRows(), { victim, killer }));
   sendScores(); checkWin();
 }
-function sendScores() { const rows = [...scores.entries()].map(([id, s]) => ({ id, ...s })); net.send('score', rows); applyScores(rows); }
-function applyScores(rows) { scores.clear(); for (const r of rows) scores.set(r.id, { name: r.name, kills: r.kills, deaths: r.deaths }); refreshScoreHud(); }
-function sortedScores() { return [...scores.entries()].sort((a, b) => b[1].kills - a[1].kills || a[1].deaths - b[1].deaths); }
+function scoreRows() { return [...scores.entries()].map(([id, s]) => ({ id, ...s })); }
+function replaceScores(rows) { scores.clear(); for (const r of rows) scores.set(r.id, { name: r.name, kills: r.kills, deaths: r.deaths }); }
+function sendScores() { const rows = scoreRows(); net.send('score', rows); applyScores(rows); }
+function applyScores(rows) { replaceScores(rows); refreshScoreHud(); }
+function sortedScores() { return sortPvpScores(scoreRows()).map((row) => [row.id, { name: row.name, kills: row.kills, deaths: row.deaths }]); }
 function refreshScoreHud() {
   if (!online()) return;
   const rows = sortedScores(); const top = rows.slice(0, 3); const myIdx = rows.findIndex(([id]) => id === net.id);
@@ -419,8 +429,7 @@ function boardHTML(title = i18n.t('pvp.freeForAll')) {
 }
 function checkWin() {
   if (!net.isHost || !online() || game.over) return;
-  let winner = null;
-  for (const [id, s] of scores) if (s.kills >= FFA_TARGET) winner = { id, name: s.name };
+  const winner = findPvpWinner(scoreRows(), FFA_TARGET);
   if (winner) { net.send('end', winner); endMatch(winner); }
 }
 function endMatch(winner) {
@@ -521,7 +530,7 @@ net.on('taken', (d) => { const p = pickups.find((x) => x.id === d.id); if (p) re
 net.on('take', (d) => { if (!net.isHost) return; const p = pickups.find((x) => x.id === d.id); if (p) { removePickup(p); net.send('taken', { id: d.id }); } });
 net.on('ps', (d, from) => { const r = remote.get(from); if (r) { r.push(d, performance.now() / 1000); r.lastSeen = performance.now(); } });
 net.on('pdmg', (d) => {
-  if (!player.alive || game.state !== 'play' || player.shieldT > 0) return; player.lastHitBy = d.by || null; player.lastHit = { from: d.from || null, crit: !!d.crit, amount: d.amount, src: d.src };
+  if (!canApplyIncomingPlayerDamage({ playerAlive: player.alive, gameState: game.state, shieldTime: player.shieldT })) return; player.lastHitBy = d.by || null; player.lastHit = { from: d.from || null, crit: !!d.crit, amount: d.amount, src: d.src };
   player.takeDamage(d.amount, d.from ? new THREE.Vector3().fromArray(d.from) : null);
 });
 net.on('pdead', (d, from) => {
@@ -544,12 +553,12 @@ net.on('shots', (d, from) => {
 });
 net.on('cut', () => { if (player.grapple.state !== 'idle') { player.detachGrapple(false); effects.strokeBurst(player.center, INK.ORANGE, 8, 4, { life: 0.25, size: 0.03 }); hud.tip(i18n.t('pvp.ropeCutByOther'), 1.3); input.rumble(0.5, 0.3, 80); } });
 net.on('score', (rows) => { if (!net.isHost) applyScores(rows); });
-net.on('fell', (d, from) => { if (!net.isHost) return; const sc = scores.get(from); if (sc) { sc.kills = Math.max(0, sc.kills - 1); sendScores(); const text = i18n.t('pvp.playerFellPenalty', { name: sc.name }); net.send('feed', { text }); hud.kill(text, 0); } });
+net.on('fell', (d, from) => { if (!net.isHost) return; const before = scores.get(from); if (before) { replaceScores(applyPvpFallPenalty(scoreRows(), { playerId: from })); sendScores(); const text = i18n.t('pvp.playerFellPenalty', { name: before.name }); net.send('feed', { text }); hud.kill(text, 0); } });
 net.on('feed', (d) => hud.kill(String(d.text || ''), 0));
 player.onFall = () => {
   if (!online() || !inMatch()) return;
   hud.kill(i18n.t('pvp.fellPenalty'), 0);
-  if (net.isHost) { const sc = scores.get(net.id); if (sc) { sc.kills = Math.max(0, sc.kills - 1); sendScores(); net.send('feed', { text: i18n.t('pvp.playerFellPenalty', { name: sc.name }) }); } }
+  if (net.isHost) { const sc = scores.get(net.id); if (sc) { replaceScores(applyPvpFallPenalty(scoreRows(), { playerId: net.id })); sendScores(); net.send('feed', { text: i18n.t('pvp.playerFellPenalty', { name: sc.name }) }); } }
   else net.send('fell', {});
 };
 net.on('clock', (d) => { if (!net.isHost) { matchLeft = d.left; clockRunning = !!d.on; } });

@@ -13,6 +13,7 @@
 - `src/throwables.js`、`src/throwableLoadout.js` 与 `src/throwableManager.js`：负责投掷物注册、开始前携带数量规则和运行时投掷物数量/活动实体边界；当前只注册手雷，总携带上限为 5。
 - `src/grapple.js`：负责钩爪规则，当前最大可挂距离为 100，HUD 提示和实际发射必须共用该规则。
 - `src/gameplay/waves.js`：负责单人生存波次的纯规则，包括敌人解锁、权重、修饰器、Boss 轮换、敌人队列、检查点和提示 key；不访问 HUD、音频、Three.js、Net 或浏览器运行时。
+- `src/gameplay/pvpCombatRules.js`：负责 PVP 命中、防御、死亡 payload、死亡计分、坠落惩罚、比分排序和胜者判断的纯规则；不访问 Three.js、HUD、Net、Player、RemotePlayer、i18n 或浏览器运行时。
 - `src/screens/mainMenu.js`：负责主菜单侧边书签 Tab 和开始/设置/操作说明页渲染。
 - `src/screens/onlineMenu.js`：负责在线页、大厅页、大厅列表的渲染和 DOM 事件绑定；通过 `state/actions` 依赖注入，不直接依赖 `Net`、Three.js 或浏览器运行时单例。
 - `src/online/lobbyActions.js`：负责在线大厅业务动作和在线菜单 state/actions 适配，包括创建、加入、快速匹配、刷新大厅列表、LAN/公网模式切换、LAN 信令检测和错误转换；不负责 PVP 战斗同步、主机迁移、`net.on(...)` 或 `leaveOnline()` 的生命周期清理。
@@ -37,6 +38,7 @@
 - 新增或修改用户可见文字必须走 `src/i18n.js`，至少提供中文和英文，不得在交互 UI 中直接写死单语言文本。
 - 修改主菜单布局、语言切换、钩爪规则或投掷物携带规则后，运行对应的 `test/i18n.test.mjs`、`test/main-menu-layout.test.mjs`、`test/grapple.test.mjs`、`test/throwable-loadout.test.mjs` 和 `test/throwable-manager.test.mjs`。
 - 修改单人生存波次规则后，运行 `node test/waves.test.mjs`、`node test/grenade-loadout-start.test.mjs`、`node --check src/gameplay/waves.js` 和 `node --check src/main.js`。
+- 修改 PVP 战斗规则后，运行 `node test/pvp-combat-rules.test.mjs`、`node test/online-ui-state.test.mjs`、`node test/net-lan-public-discovery.test.mjs`、`node --check src/gameplay/pvpCombatRules.js` 和 `node --check src/main.js`；不得改变 `pdmg`、`pdead`、`parry`、`score`、`fell`、`feed` 网络 payload 结构。
 - 新增或修改训练场地图后，运行 `python3 .codex/skills/training-map-validation/scripts/validate_doodleshooter_training_map.py .` 做训练场地图结构校验。
 - 修改 Node 本地服务或局域网信令后，运行 `npm run check:lan-server` 验证静态资源和本地信令健康检查。
 - 修改 Docker 启动方式后，运行 `node test/docker-lan-config.test.mjs` 验证镜像入口和端口暴露仍支持局域网 `/peerjs` 信令。

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 
 const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
 const lobbyActions = readFileSync(new URL('../src/online/lobbyActions.js', import.meta.url), 'utf8');
+const pvpCombatRules = readFileSync(new URL('../src/gameplay/pvpCombatRules.js', import.meta.url), 'utf8');
 
 assert.match(main, /import \{[^}]*bindLobbyScreen[^}]*bindOnlineScreen[^}]*renderLobbyList[^}]*renderLobbyScreen[^}]*renderOnlineScreen[^}]*\} from '\.\/screens\/onlineMenu\.js';/, 'main should consume the online menu module and import renderLobbyList before injecting it into lobby actions');
 assert.match(main, /let onlineTab = 'lan'/, 'online UI should keep the selected network tab state');
@@ -10,6 +11,7 @@ assert.match(main, /lobbyLists = \{ public: null, lan: null \}/, 'public and LAN
 assert.match(main, /renderOnlineScreen\(/, 'online screen rendering should be delegated to the screen module');
 assert.match(main, /renderLobbyScreen\(/, 'lobby screen rendering should be delegated to the screen module');
 assert.match(main, /createLobbyActions/, 'main should use the online lobby actions module');
+assert.match(main, /pvpCombatRules\.js/, 'main should use the PVP combat rules module');
 assert.doesNotMatch(main, /function onlineHTML\(/, 'online HTML should not remain in main');
 assert.doesNotMatch(main, /function lobbyHTML\(/, 'lobby HTML should not remain in main');
 assert.doesNotMatch(main, /async function createLobby\(/, 'createLobby should live in src/online/lobbyActions.js');
@@ -25,3 +27,6 @@ assert.doesNotMatch(main, /const ROSTER = \[/, 'wave roster should live in src/g
 assert.doesNotMatch(main, /const MODIFIERS = \[/, 'wave modifiers should live in src/gameplay/waves.js');
 assert.doesNotMatch(main, /const bossFor = /, 'boss selection should live in src/gameplay/waves.js');
 assert.match(main, /buildWavePlan\(/, 'main should call the wave rule module');
+assert.doesNotMatch(main, /h\.crit \|\| h\.amount >= 90 \|\| h\.src === 'katana'/, 'local death overkill rule should live in pvpCombatRules.js');
+assert.doesNotMatch(main, /facing > 0\.6 && frontHit && info\.source === 'katana' && t\.parryWindow/, 'katana parry rule should live in pvpCombatRules.js');
+assert.doesNotMatch(pvpCombatRules, /from ['"]three['"]|\.\.\/hud\.js|\.\.\/net\.js|\bdocument\b|\bwindow\b|\blocalStorage\b|new Player\b|new RemotePlayer\b/, 'PVP combat rules should stay dependency-free');
