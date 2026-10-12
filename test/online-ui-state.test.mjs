@@ -4,7 +4,7 @@ import { readFileSync } from 'node:fs';
 const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
 const lobbyActions = readFileSync(new URL('../src/online/lobbyActions.js', import.meta.url), 'utf8');
 
-assert.match(main, /import \{ bindLobbyScreen, bindOnlineScreen, renderLobbyScreen, renderOnlineScreen \} from '\.\/screens\/onlineMenu\.js';/, 'main should consume the online menu module');
+assert.match(main, /import \{[^}]*bindLobbyScreen[^}]*bindOnlineScreen[^}]*renderLobbyList[^}]*renderLobbyScreen[^}]*renderOnlineScreen[^}]*\} from '\.\/screens\/onlineMenu\.js';/, 'main should consume the online menu module and import renderLobbyList before injecting it into lobby actions');
 assert.match(main, /let onlineTab = 'lan'/, 'online UI should keep the selected network tab state');
 assert.match(main, /lobbyLists = \{ public: null, lan: null \}/, 'public and LAN lobby lists should be stored separately');
 assert.match(main, /renderOnlineScreen\(/, 'online screen rendering should be delegated to the screen module');

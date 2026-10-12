@@ -21,7 +21,7 @@ import { LAN_SIGNALING, PUBLIC_SIGNALING, checkLanSignaling, readPublicSignaling
 import { HUD, controlsHTML } from './hud.js';
 import { createI18n } from './i18n.js';
 import { bindMainMenuTabs, renderMainMenu } from './screens/mainMenu.js';
-import { bindLobbyScreen, bindOnlineScreen, renderLobbyScreen, renderOnlineScreen } from './screens/onlineMenu.js';
+import { bindLobbyScreen, bindOnlineScreen, renderLobbyList, renderLobbyScreen, renderOnlineScreen } from './screens/onlineMenu.js';
 import { buildWavePlan } from './gameplay/waves.js';
 import { createLobbyActions } from './online/lobbyActions.js';
 import { audio } from './audio.js';
