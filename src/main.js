@@ -22,6 +22,7 @@ import { HUD, controlsHTML } from './hud.js';
 import { createI18n } from './i18n.js';
 import { bindMainMenuTabs, renderMainMenu } from './screens/mainMenu.js';
 import { bindLobbyScreen, bindOnlineScreen, renderLobbyScreen, renderOnlineScreen } from './screens/onlineMenu.js';
+import { buildWavePlan } from './gameplay/waves.js';
 import { audio } from './audio.js';
 import { rand, choose, clamp } from './util.js';
 
@@ -226,16 +227,6 @@ function updateArenaPickups(dt) {
 }
 
 // ---------------- solo waves ----------------
-const ROSTER = [
-  { t: 'grunt', from: 1, w: 10 }, { t: 'rusher', from: 2, w: 6 }, { t: 'bomber', from: 3, w: 3 },
-  { t: 'sniper', from: 3, w: 4 }, { t: 'flyer', from: 4, w: 4 }, { t: 'heavy', from: 5, w: 4 }, { t: 'shield', from: 6, w: 4 },
-];
-const MODIFIERS = [
-  { nameKey: '', apply: () => { enemies.mods.speed = 1; enemies.mods.damage = 1; } },
-  { nameKey: 'modifier.caffeine', apply: () => { enemies.mods.speed = 1.35; enemies.mods.damage = 0.85; } },
-  { nameKey: 'modifier.heavyInk', apply: () => { enemies.mods.speed = 0.9; enemies.mods.damage = 1.4; } },
-  { nameKey: 'modifier.swarm', apply: () => { enemies.mods.speed = 1.15; enemies.mods.damage = 0.9; } },
-];
 const tips = () => [
   i18n.t('tip.grapple', { key: hud.key('grapple') }),
   i18n.t('tip.block', { key: hud.key('block') }),
@@ -243,27 +234,21 @@ const tips = () => [
   i18n.t('tip.grenade', { key: hud.key('grenade') }),
   i18n.t('tip.doubleJump', { key: hud.key('jump') }),
 ];
-const bossFor = (n) => BOSSES[(Math.floor(n / 5) - 1) % BOSSES.length];
 const enemyName = (type) => enemyDisplayName(type);
 function startWave(n) {
-  game.wave = n; game.queue = []; game.spawnT = 2; game.intermission = 0; game.boss = null; hud.setBoss(null, null);
-  const boss = n > 0 && n % 5 === 0;
-  const allowed = boss || n < 4 ? 1 : n < 6 ? 3 : MODIFIERS.length; const mod = MODIFIERS[Math.floor(Math.random() * allowed)];
-  mod.apply(); enemies.mods.damage *= 1.2; hud.setModifier(mod.nameKey ? i18n.t(mod.nameKey) : '');
-  const swarm = mod.nameKey === 'modifier.swarm';
-  // the crowd on screen and the wave size both keep growing with the wave number
-  game.maxAlive = Math.min(4 + Math.floor(n * 0.9) + (swarm ? 3 : 0), (swarm ? 22 : 18) + Math.floor(n / 3));
-  let count = Math.round(Math.min(5 + n * 2.0, 32 + n) * (swarm ? 1.35 : 1));
-  if (boss) { count = 7 + n; game.maxAlive += 2 + Math.floor(n / 5); game.queue.push(bossFor(n)); }
-  const pool = ROSTER.filter((r) => n >= r.from).map((r) => ({ t: r.t, w: r.w * Math.min(1, 0.3 + 0.25 * (n - r.from)) }));
-  const total = pool.reduce((a, r) => a + r.w, 0);
-  for (let i = 0; i < count; i++) { let r = Math.random() * total, t = pool[0].t; for (const c of pool) { r -= c.w; if (r <= 0) { t = c.t; break; } } game.queue.push(t); }
-  if (boss) { hud.message(i18n.t('wave.title', { wave: n }), i18n.t('wave.bossApproaching', { boss: enemyName(bossFor(n)) }), 3); audio.bossRoar(player.center); }
-  else hud.message(i18n.t('wave.title', { wave: n }), n === 1 ? i18n.t('wave.firstSubtitle') : (mod.nameKey ? i18n.t(mod.nameKey) : i18n.t(choose(['wave.random.stronger', 'wave.random.keepDrawing', 'wave.random.stayAirborne', 'wave.random.useBlade', 'wave.random.deflect']))), 2.6);
+  const plan = buildWavePlan(n, { bossTypes: BOSSES });
+  game.wave = plan.wave; game.queue = plan.enemyQueue.slice(); game.spawnT = 2; game.intermission = 0; game.boss = null; hud.setBoss(null, null);
+  enemies.mods.speed = plan.modifier.speed;
+  enemies.mods.damage = plan.modifier.damage * 1.2;
+  hud.setModifier(plan.modifier.nameKey ? i18n.t(plan.modifier.nameKey) : '');
+  game.maxAlive = plan.maxAlive;
+  if (plan.isBossWave && plan.bossType) { hud.message(i18n.t('wave.title', { wave: plan.wave }), i18n.t('wave.bossApproaching', { boss: enemyName(plan.bossType) }), 3); audio.bossRoar(player.center); }
+  else hud.message(i18n.t('wave.title', { wave: plan.wave }), plan.subtitleKey ? i18n.t(plan.subtitleKey) : (plan.modifier.nameKey ? i18n.t(plan.modifier.nameKey) : i18n.t(choose(['wave.random.stronger', 'wave.random.keepDrawing', 'wave.random.stayAirborne', 'wave.random.useBlade', 'wave.random.deflect']))), 2.6);
   audio.wave();
-  if (n <= tips().length) hud.tip(tips()[n - 1], 7);
-  for (let i = 0; i < 7; i++) spawnPickup(i < 5 ? 'ammo' : 'health', choose(level.pickups));
-  if (n >= 5 && n % 5 === 0 && n > checkpoint) { checkpoint = n; localStorage.setItem('doodle_checkpoint', String(n)); hud.kill(i18n.t('wave.checkpoint', { wave: n }), 0); }
+  const tip = tips()[plan.wave - 1];
+  if (tip) hud.tip(tip, 7);
+  for (let i = 0; i < plan.pickupCount; i++) spawnPickup(i < 5 ? 'ammo' : 'health', choose(level.pickups));
+  if (plan.checkpoint && plan.wave > checkpoint) { checkpoint = plan.wave; localStorage.setItem('doodle_checkpoint', String(plan.wave)); hud.kill(i18n.t('wave.checkpoint', { wave: plan.wave }), 0); }
 }
 function pickSpawn(type) {
   const spots = type === 'sniper' ? level.snipers : level.spawns; const pp = player.body.pos;

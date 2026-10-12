@@ -14,3 +14,7 @@ assert.match(main, /setMode\(LAN_SIGNALING, location, \{ allowStun: publicSignal
 assert.match(main, /i18n\.t\('pvp\.lanDirectFailed'\)/, 'LAN connection failures should explain that direct P2P setup failed');
 assert.match(main, /\[network diagnostic\]/, 'LAN connection diagnostics should be visible in the browser console');
 assert.doesNotMatch(main, /querySelectorAll\('button'\)\) b\.disabled = false/, 'unlockButtons should not blindly re-enable every button');
+assert.doesNotMatch(main, /const ROSTER = \[/, 'wave roster should live in src/gameplay/waves.js');
+assert.doesNotMatch(main, /const MODIFIERS = \[/, 'wave modifiers should live in src/gameplay/waves.js');
+assert.doesNotMatch(main, /const bossFor = /, 'boss selection should live in src/gameplay/waves.js');
+assert.match(main, /buildWavePlan\(/, 'main should call the wave rule module');

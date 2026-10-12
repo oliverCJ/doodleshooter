@@ -11,6 +11,7 @@
 - `src/loadout.js`：负责武器配置规则，当前规则是 4 个武器槽位中必须包含主武器和近战武器。
 - `src/throwables.js`、`src/throwableLoadout.js` 与 `src/throwableManager.js`：负责投掷物注册、开始前携带数量规则和运行时投掷物数量/活动实体边界；当前只注册手雷，总携带上限为 5。
 - `src/grapple.js`：负责钩爪规则，当前最大可挂距离为 100，HUD 提示和实际发射必须共用该规则。
+- `src/gameplay/waves.js`：负责单人生存波次的纯规则，包括敌人解锁、权重、修饰器、Boss 轮换、敌人队列、检查点和提示 key；不访问 HUD、音频、Three.js、Net 或浏览器运行时。
 - `src/screens/mainMenu.js`：负责主菜单侧边书签 Tab 和开始/设置/操作说明页渲染。
 - `src/screens/onlineMenu.js`：负责在线页、大厅页、大厅列表的渲染和 DOM 事件绑定；通过 `state/actions` 依赖注入，不直接依赖 `Net`、Three.js 或浏览器运行时单例。
 - `src/mapConfig.js` 与 `src/levels/`：负责地图配置、固定地图注册和具体固定地图构建。
@@ -33,6 +34,7 @@
 - 固定地图新增应优先通过 `src/levels/registry.js` 注册，并将地图构建逻辑放在 `src/levels/` 下。
 - 新增或修改用户可见文字必须走 `src/i18n.js`，至少提供中文和英文，不得在交互 UI 中直接写死单语言文本。
 - 修改主菜单布局、语言切换、钩爪规则或投掷物携带规则后，运行对应的 `test/i18n.test.mjs`、`test/main-menu-layout.test.mjs`、`test/grapple.test.mjs`、`test/throwable-loadout.test.mjs` 和 `test/throwable-manager.test.mjs`。
+- 修改单人生存波次规则后，运行 `node test/waves.test.mjs`、`node test/grenade-loadout-start.test.mjs`、`node --check src/gameplay/waves.js` 和 `node --check src/main.js`。
 - 新增或修改训练场地图后，运行 `python3 .codex/skills/training-map-validation/scripts/validate_doodleshooter_training_map.py .` 做训练场地图结构校验。
 - 修改 Node 本地服务或局域网信令后，运行 `npm run check:lan-server` 验证静态资源和本地信令健康检查。
 - 修改 Docker 启动方式后，运行 `node test/docker-lan-config.test.mjs` 验证镜像入口和端口暴露仍支持局域网 `/peerjs` 信令。
