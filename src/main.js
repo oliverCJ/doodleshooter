@@ -23,6 +23,7 @@ import { createI18n } from './i18n.js';
 import { bindMainMenuTabs, renderMainMenu } from './screens/mainMenu.js';
 import { bindLobbyScreen, bindOnlineScreen, renderLobbyScreen, renderOnlineScreen } from './screens/onlineMenu.js';
 import { buildWavePlan } from './gameplay/waves.js';
+import { createLobbyActions } from './online/lobbyActions.js';
 import { audio } from './audio.js';
 import { rand, choose, clamp } from './util.js';
 
@@ -488,7 +489,7 @@ net.on('diagnostic', (event) => {
   });
 });
 net.on('iceStateChanged', ({ state }) => {
-  if (net.mode === LAN_SIGNALING && state === 'failed') setStatus(i18n.t('pvp.lanDirectFailed'));
+  if (net.mode === LAN_SIGNALING && state === 'failed') lobbyActions().setStatus(i18n.t('pvp.lanDirectFailed'));
   console.info(`[network] ${net.mode} ICE state: ${state}`);
 });
 net.on('connectionError', ({ message, metadata }) => {
@@ -589,36 +590,6 @@ function leaveOnline(reason) {
   if (game.state !== 'start') { game.state = 'start'; game.mode = 'solo'; setArena(false); resetGame(); hud.setGameplayVisible(false); }
   game.menu = false; lobby.status = reason || ''; screen = 'online'; showStart();
 }
-async function createLobby(isPublic) {
-  setStatus(i18n.t('online.status.creating'));
-  try { await net.host({ isPublic }); }
-  catch (err) { setStatus(friendlyError(err)); unlockButtons(); return; }
-  lobby.isPublic = isPublic; lobby.mapConfig = serializeMapConfig(mapConfig, LEVELS); lobby.map = lobby.mapConfig.key; lobby.players.clear(); lobby.players.set(net.id, { name: myName, loadout: loadout.slice() }); lobby.hostId = net.id; lobby.status = '';
-  game.state = 'lobby'; screen = 'lobby'; showStart();
-}
-async function joinLobby(code) {
-  setStatus(i18n.t('online.status.connecting'));
-  try { await net.join(code, { name: myName, loadout }); } catch (err) { setStatus(friendlyError(err)); unlockButtons(); return; }
-  lobby.isPublic = net.isPublic; lobby.status = ''; game.state = 'lobby'; screen = 'lobby'; showStart();
-}
-async function quickPlay() {
-  try { await net.quickJoin({ name: myName, loadout }, setStatus); lobby.isPublic = true; lobby.status = ''; game.state = 'lobby'; screen = 'lobby'; showStart(); return; }
-  catch (err) { if (!/no open public/.test(String(err.message))) { setStatus(friendlyError(err)); unlockButtons(); return; } }
-  setStatus(i18n.t('online.status.noOpenLobbyCreate', { mode: net.mode === LAN_SIGNALING ? i18n.t('online.status.lanMode') : i18n.t('online.status.publicMode') }));
-  await createLobby(true);
-}
-function friendlyError(err) {
-  const m = String(err && err.message || err || ''); if (!m) return i18n.t('online.status.genericError');
-  if (/networking library/.test(m)) return i18n.t('online.status.libraryError');
-  if (/Negotiation of connection|could not connect|connection failed/i.test(m)) return net.mode === LAN_SIGNALING ? i18n.t('pvp.lanDirectFailed') : i18n.t('online.status.peerDirectFailed');
-  if (/timed out|signalling/.test(m)) return i18n.t('online.status.signalingFailed');
-  if (/no lobby with that code/.test(m)) return i18n.t('online.status.noLobbyCode');
-  if (/no answer/.test(m)) return i18n.t('online.status.noAnswer');
-  if (/full/.test(m)) return i18n.t('online.status.full');
-  if (/leave the lobby/.test(m)) return i18n.t('online.status.leaveFirst');
-  return m;
-}
-function setStatus(t) { lobby.status = t; const el = hud.el.panel.querySelector('#status'); if (el) el.textContent = t; }
 
 // ---------------- screens ----------------
 function settingsHTML() {
@@ -743,67 +714,50 @@ function gameSettingsHTML() {
 let onlineTab = 'lan';
 const lobbyLists = { public: null, lan: null };
 const lobbyListBusy = { public: false, lan: false };
-async function refreshLobbies(mode = onlineTab) {
-  if (lobbyListBusy[mode] || net.active) return; lobbyListBusy[mode] = true; const box = hud.el.panel.querySelector('#lobbyRows'); if (box && mode === onlineTab) box.innerHTML = renderLobbyList({ i18n, state: onlineMenuState(), mode });
-  let err = null; try { if (mode === 'lan') useLanNetwork(); else usePublicNetwork(); lobbyLists[mode] = await net.listLobbies({ name: myName }); } catch (e) { lobbyLists[mode] = []; err = e; }
-  lobbyListBusy[mode] = false; const rows = hud.el.panel.querySelector('#lobbyRows'); if (rows && mode === onlineTab) rows.innerHTML = err ? `<div class="hint">${i18n.t('lobby.searchFailed', { reason: esc(friendlyError(err)) })}</div>` : renderLobbyList({ i18n, state: onlineMenuState(), mode });
-}
-async function refreshLanSignaling() {
-  lanSignalingAvailable = await checkLanSignaling();
-  return lanSignalingAvailable;
-}
-function usePublicNetwork() {
-  net.setMode(PUBLIC_SIGNALING);
-}
-function useLanNetwork() {
-  net.setMode(LAN_SIGNALING, location, { allowStun: publicSignalingEnabled });
-  console.info('[network] LAN PeerJS config', { host: net.peerOptions.host, port: net.peerOptions.port, path: net.peerOptions.path, iceServers: net.peerOptions.config.iceServers.length });
-}
-function onlineMenuState() {
-  return {
-    onlineTab,
-    lanSignalingAvailable,
-    publicSignalingEnabled,
+let lobbyActionController = null;
+function lobbyActions() {
+  if (!lobbyActionController) lobbyActionController = createLobbyActions({
+    net,
     lobby,
     lobbyLists,
     lobbyListBusy,
-    myName,
-    maxPlayers: net.maxPlayers,
-    ffaTarget: FFA_TARGET,
-    selfId: net.id,
-    isHost: net.isHost,
-    aliasCode: net.aliasCode,
-    code: net.code,
-    players: lobbyRows(),
-    mapConfig: lobby.mapConfig || lobby.map || mapConfig,
+    i18n,
+    hud,
+    storage: localStorage,
+    location,
+    levels: LEVELS,
+    lanSignaling: LAN_SIGNALING,
+    publicSignaling: PUBLIC_SIGNALING,
+    checkLanSignaling,
+    writePublicSignalingEnabled,
+    serializeMapConfig,
+    renderLobbyList,
     mapHtml: (config, canPick) => mapHTML(config, canPick),
-  };
-}
-function onlineMenuActions() {
-  return {
-    setName: (value) => { myName = String(value).trim().slice(0, 14) || myName; localStorage.setItem('doodle_name', myName); player.name = myName; net.hostName = myName; },
-    togglePublicSignaling: (enabled) => { publicSignalingEnabled = writePublicSignalingEnabled(localStorage, enabled); lobbyLists.public = null; showStart(); },
-    setOnlineTab: (mode) => { onlineTab = mode; showStart(); },
-    setStatus: (key) => setStatus(i18n.t(key)),
-    quickPlay,
-    createLobby,
-    joinLobby,
-    refreshLobbies,
-    rejoinLobby: (code) => { lobby.rejoinCode = null; joinLobby(code); },
-    backToMain: () => { lobby.status = ''; lobby.rejoinCode = null; screen = 'main'; showStart(); },
-    useLanNetwork,
-    usePublicNetwork,
-    lockButtons,
-    leaveOnline: (reason) => { lobby.rejoinCode = null; leaveOnline(reason); },
+    getOnlineTab: () => onlineTab,
+    setOnlineTab: (mode) => { onlineTab = mode; },
+    getPublicSignalingEnabled: () => publicSignalingEnabled,
+    setPublicSignalingEnabled: (enabled) => { publicSignalingEnabled = enabled; },
+    getLanSignalingAvailable: () => lanSignalingAvailable,
+    setLanSignalingAvailable: (available) => { lanSignalingAvailable = available; },
+    getMyName: () => myName,
+    setMyName: (value) => { myName = String(value).trim().slice(0, 14) || myName; localStorage.setItem('doodle_name', myName); player.name = myName; net.hostName = myName; },
+    getLoadout: () => loadout,
+    getMapConfig: () => mapConfig,
+    setGameLobby: () => { game.state = 'lobby'; },
+    setScreen: (value) => { screen = value; },
+    showStart,
     hostStart,
-    requestHostStart: () => { net.send('startreq', {}); setStatus(i18n.t('online.status.requestingHostStart')); },
-    wireMap: (onPick) => wireMap(onPick),
+    requestHostStart: () => { net.send('startreq', {}); lobbyActions().setStatus(i18n.t('online.status.requestingHostStart')); },
+    leaveOnline,
+    wireMap,
     onMapPick: (config) => { if (net.isHost) { lobby.mapConfig = serializeMapConfig(config, LEVELS); lobby.map = lobby.mapConfig.key; broadcastLobby(); } },
-    refreshOnBind: true,
-  };
+    lobbyRows,
+    ffaTarget: FFA_TARGET,
+  });
+  return lobbyActionController;
 }
-function lockButtons(box) { for (const b of box.querySelectorAll('button')) if (b.id !== 'backBtn') b.disabled = true; }
-function unlockButtons() { showStart(); }
+function onlineMenuState() { return lobbyActions().state(); }
+function onlineMenuActions() { return lobbyActions().actions(); }
 function renderLobby() { if (game.state === 'lobby') showStart(); }
 function showStart() {
   hud.setGameplayVisible(false);
@@ -823,7 +777,7 @@ function showStart() {
     if (soloBtn) soloBtn.addEventListener('click', (e) => { e.stopPropagation(); begin(); });
     if (gameSettingsBtn) gameSettingsBtn.addEventListener('click', (e) => { e.stopPropagation(); screen = 'gameSettings'; showStart(); });
     if (trainingBtn) trainingBtn.addEventListener('click', (e) => { e.stopPropagation(); beginTraining(); });
-    if (onlineBtn) onlineBtn.addEventListener('click', async (e) => { e.stopPropagation(); screen = 'online'; await refreshLanSignaling(); showStart(); });
+    if (onlineBtn) onlineBtn.addEventListener('click', async (e) => { e.stopPropagation(); screen = 'online'; await lobbyActions().refreshLanSignaling(); showStart(); });
   } else if (screen === 'gameSettings') wireGameSettings();
   else if (screen === 'lobby') bindLobbyScreen(p.querySelector('#online'), { state: onlineState, actions: onlineActions });
   else bindOnlineScreen(p.querySelector('#online'), { state: onlineState, actions: onlineActions });
@@ -887,7 +841,25 @@ function startMatch(late, spawnIdx) {
 }
 function pause() { if ((game.state !== 'play' && !(game.state === 'dying' && online())) || game.menu) return; if (!online()) game.state = 'pause'; game.menu = true; showPause(); audio.reelLoop(false); }
 function resume() { if (online()) { game.menu = false; if (game.state === 'dying' && game.respawnT <= 0) game.respawnArm = input.lastActive; hud.hideScreen(); hud.setGameplayVisible(true); if (!input.usingGamepad) input.requestLock(); return; } if (game.mode === 'training') { game.state = 'play'; game.menu = false; hud.hideScreen(); hud.setGameplayVisible(true); if (!input.usingGamepad) input.requestLock(); return; } begin(); }
-Object.assign(window.__game, { startWave, updateWaves, begin, beginAtWave, beginTraining, jumpToWave, resetGame, spawnPickup, focusCandidate, enterFocus, pickSpawn, startMatch, createLobby, joinLobby, quickPlay, leaveOnline, hostStart });
+Object.assign(window.__game, {
+  startWave,
+  updateWaves,
+  begin,
+  beginAtWave,
+  beginTraining,
+  jumpToWave,
+  resetGame,
+  spawnPickup,
+  focusCandidate,
+  enterFocus,
+  pickSpawn,
+  startMatch,
+  createLobby: (...args) => lobbyActions().createLobby(...args),
+  joinLobby: (...args) => lobbyActions().joinLobby(...args),
+  quickPlay: (...args) => lobbyActions().quickPlay(...args),
+  leaveOnline,
+  hostStart,
+});
 hud.onScreenClick = () => {
   const st = game.state;
   if (st === 'over') { if (net.isHost) { net.send('backtolobby', {}); toLobbyScreen(); } return; }
