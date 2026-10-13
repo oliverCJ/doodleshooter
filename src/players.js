@@ -5,10 +5,10 @@
 import * as THREE from 'three';
 import { makeInkMaterial, setFill, INK } from './render.js';
 import { buildHumanoid, buildWeaponProp } from './enemies.js';
+import { DEFAULT_LOADOUT, normalizeLoadout } from './loadout.js';
 import { clamp, damp, angleLerp, wrapAngle } from './util.js';
 
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _up = new THREE.Vector3(0, 1, 0);
-const WEAPON_KINDS = ['rifle', 'shotgun', 'sniper', 'blade'];
 const HIT = [['head', 0.3], ['torso', 0.33], ['hips', 0.2], ['armL', 0.11], ['armR', 0.11], ['foreL', 0.1], ['foreR', 0.1], ['legL', 0.13], ['legR', 0.13], ['shinL', 0.11], ['shinR', 0.11]];
 
 // what a player broadcasts about itself, ~20 times a second:
@@ -25,7 +25,7 @@ export function encodeLocal(P, weaponIndex, extra = {}) {
 export class RemotePlayer {
   constructor(ctx, id, name, team, ink) {
     this.ctx = ctx; this.id = id; this.name = name || 'doodle'; this.team = team; this.ink = ink;
-    this.isLocal = false; this.alive = true; this.parryWindow = false; this.idle = false; this.idleSince = 0; this.untouched = false; this.away = false; this.hp = 100; this.maxHp = 100; this.speed = 0; this.weaponIndex = 0;
+    this.isLocal = false; this.alive = true; this.parryWindow = false; this.idle = false; this.idleSince = 0; this.untouched = false; this.away = false; this.hp = 100; this.maxHp = 100; this.speed = 0; this.weaponIndex = 0; this.loadout = DEFAULT_LOADOUT.slice();
     this.body = { pos: new THREE.Vector3(0, -50, 0), vel: new THREE.Vector3(), halfW: 0.35, height: 1.75, onGround: true };
     this.center = new THREE.Vector3(); this.eye = new THREE.Vector3(); this.forward = new THREE.Vector3(0, 0, -1); this.right = new THREE.Vector3(1, 0, 0);
     this.yaw = 0; this.pitch = 0; this.crouching = false; this.sliding = false; this.blocking = false; this.aiming = false; this.firing = false;
@@ -66,10 +66,18 @@ export class RemotePlayer {
   }
   get isBlocking() { return this.blocking; }
   get blockRadius() { return 0; }
+  setLoadout(loadout, registry) {
+    this.loadout = normalizeLoadout(loadout, registry);
+    this.weaponIndex = -1;
+  }
   setWeapon(i) {
     if (i === this.weaponIndex && this.J.gun.children.length) return; this.weaponIndex = i;
     const gun = this.J.gun; while (gun.children.length) gun.remove(gun.children[0]);
-    buildWeaponProp(gun, this.mat, this.solid, { weapon: WEAPON_KINDS[i] || 'rifle' });
+    const weaponId = this.loadout[i] || this.loadout[0] || 'rifle';
+    const meta = this.ctx.weaponRegistry && this.ctx.weaponRegistry[weaponId];
+    const prop = meta && meta.prop || (meta && meta.category === 'melee' ? 'blade' : 'rifle');
+    this.T.weapon = prop;
+    buildWeaponProp(gun, this.mat, this.solid, { weapon: prop });
   }
   push(snap, t) {
     if (!snap) return;
@@ -139,7 +147,9 @@ export class RemotePlayer {
     if (!b.onGround) { J.legL.rotation.x = -0.5; J.legR.rotation.x = 0.6; J.shinL.rotation.x = 1.0; J.shinR.rotation.x = 0.5; }
     // guns are carried up and forward, two hands on them, tilting with where they look; the
     // blade hangs at the side until it is raised to guard
-    const blade = this.weaponIndex === WEAPON_KINDS.length - 1; const aim = blade ? 0 : (this.aiming ? 1 : sp > 6.5 ? 0.8 : 0.95);
+    const weaponId = this.loadout[this.weaponIndex] || this.loadout[0] || 'rifle';
+    const meta = this.ctx.weaponRegistry && this.ctx.weaponRegistry[weaponId];
+    const blade = meta ? meta.category === 'melee' : weaponId === 'katana'; const aim = blade ? 0 : (this.aiming ? 1 : sp > 6.5 ? 0.8 : 0.95);
     const look = clamp(this.pitch, -1.1, 1.1);
     if (blade) {
       const g = this.blocking ? 1 : 0;

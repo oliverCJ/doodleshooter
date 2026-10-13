@@ -1,24 +1,16 @@
-# 涂鸦街区 (Doodle District) - 静态站点 Dockerfile
-FROM nginx:1.27-alpine
+# 涂鸦街区 (Doodle District) - 局域网联机 Node 服务镜像
+FROM node:22-alpine
 
-# 站点文件复制到 nginx 默认站点目录
-COPY . /usr/share/nginx/html
+WORKDIR /app
 
-# 静态资源缓存策略：vendor 下的是不可变库文件，长缓存；其余短缓存
-RUN printf 'server {\n\
-    listen 80;\n\
-    server_name _;\n\
-    root /usr/share/nginx/html;\n\
-    index index.html;\n\
-    gzip on;\n\
-    gzip_types text/plain text/css application/javascript application/json image/svg+xml;\n\
-    location /vendor/ {\n\
-        expires 30d;\n\
-        add_header Cache-Control "public, immutable";\n\
-    }\n\
-    location / {\n\
-        try_files $uri $uri/ /index.html;\n\
-    }\n\
-}\n' > /etc/nginx/conf.d/default.conf
+# 先安装依赖，便于 Docker 层缓存。
+COPY package.json package-lock.json ./
+RUN npm ci --omit=dev
 
-EXPOSE 80
+# 复制游戏静态资源和本地 PeerJS 信令服务代码。
+COPY . .
+
+EXPOSE 8910
+
+# 与本机推荐启动方式保持一致，提供静态资源、/lan-health 和 /peerjs。
+CMD ["npm", "run", "serve"]

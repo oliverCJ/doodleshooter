@@ -7,13 +7,12 @@
 // every slot at once - a directory with no directory server. A connection only counts once the
 // host has answered with a welcome, so a full or closed lobby can be skipped for the next one.
 
-// a local dev server gets its own namespace so testing can never wander into a live lobby
-const LOCAL = typeof location !== 'undefined' && /^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname);
-const PREFIX = LOCAL ? 'doodledev-' : 'doodledistrict-';
+import { LAN_SIGNALING, PUBLIC_SIGNALING, peerOptionsForMode, prefixForMode } from './networkConfig.js';
+import { APP_VERSION, SIGNALING_VERSION } from './version.js';
+
 const PUBLIC_SLOTS = 16;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 export const makeCode = () => Array.from({ length: 5 }, () => ALPHABET[Math.floor(Math.random() * ALPHABET.length)]).join('');
-const PEER_OPTS = { debug: 0, config: { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }] } };
 const JOIN_TIMEOUT = 14000, QUICK_TIMEOUT = 11000, SIGNAL_TIMEOUT = 12000;
 
 function peerAvailable() { return typeof window !== 'undefined' && typeof window.Peer === 'function'; }
@@ -24,25 +23,61 @@ export class Net {
     this.peer = null; this.conns = new Map(); this.isHost = false; this.id = null; this.code = null; this.hostId = null;
     this.handlers = new Map(); this.connected = false; this.onPeerJoin = null; this.onPeerLeave = null; this.onDisconnect = null;
     this.maxPlayers = 10; this.accepting = true; this.hostName = ''; this.stats = { sent: 0, recv: 0 }; this.isPublic = false;
+    this.mode = PUBLIC_SIGNALING; this.prefix = prefixForMode(PUBLIC_SIGNALING); this.peerOptions = peerOptionsForMode(PUBLIC_SIGNALING);
   }
   get active() { return !!this.peer && this.connected; }
   get peerIds() { return [...this.conns.keys()]; }
+  setMode(mode = PUBLIC_SIGNALING, loc = location, options = {}) {
+    if (this.active && this.mode !== mode) throw new Error('leave the lobby before switching network mode');
+    this.mode = mode === LAN_SIGNALING ? LAN_SIGNALING : PUBLIC_SIGNALING;
+    this.prefix = prefixForMode(this.mode, loc.hostname);
+    this.peerOptions = peerOptionsForMode(this.mode, loc, options);
+  }
+  compatMetadata(meta = {}) {
+    return { ...meta, appVersion: APP_VERSION, signalingVersion: SIGNALING_VERSION };
+  }
+  _versionRefusal(metadata = {}) {
+    if (metadata.signalingVersion === SIGNALING_VERSION) return null;
+    return {
+      reason: 'version mismatch',
+      code: this.aliasCode || this.code,
+      hostVersion: APP_VERSION,
+      hostSignalingVersion: SIGNALING_VERSION,
+      clientVersion: metadata.appVersion || '',
+      clientSignalingVersion: metadata.signalingVersion || '',
+    };
+  }
+  hostPeerId(code) { return this.prefix + String(code || '').toUpperCase(); }
+  codeFromPeerId(id) { return String(id || '').startsWith(this.prefix) ? String(id).slice(this.prefix.length) : String(id || ''); }
   on(type, fn) { this.handlers.set(type, fn); }
   _emit(type, data, from) { const h = this.handlers.get(type); if (h) h(data, from); }
+  _diagnostic(stage, data = {}) { this._emit('diagnostic', { stage, mode: this.mode, ...data }); }
 
   _newPeer(id) {
     return new Promise((resolve, reject) => {
       if (!peerAvailable()) return reject(new Error('networking library did not load'));
-      const peer = new window.Peer(id, PEER_OPTS); let settled = false;
+      const peer = new window.Peer(id, this.peerOptions); let settled = false;
+      this._diagnostic('peer', { type: 'create', requestedId: id || null, options: { host: this.peerOptions.host || null, port: this.peerOptions.port || null, path: this.peerOptions.path || '/', iceServers: this.peerOptions.config?.iceServers?.length || 0 } });
       const timer = setTimeout(() => { if (!settled) { settled = true; peer.destroy(); reject(new Error('signalling server timed out')); } }, SIGNAL_TIMEOUT);
-      peer.on('open', () => { if (settled) return; settled = true; clearTimeout(timer); resolve(peer); });
-      peer.on('error', (err) => { if (settled) return; settled = true; clearTimeout(timer); peer.destroy(); reject(err); });
+      peer.on('open', (peerId) => { this._diagnostic('peer', { type: 'open', peerId }); if (settled) return; settled = true; clearTimeout(timer); resolve(peer); });
+      peer.on('error', (err) => { this._diagnostic('peer', { type: 'error', message: String(err && err.message || err || 'peer error'), errorType: err && err.type || null }); if (settled) return; settled = true; clearTimeout(timer); peer.destroy(); reject(err); });
     });
   }
+  _watchConnection(conn, stage) {
+    if (!conn || conn.__doodleDiagnosticStages?.has(stage)) return;
+    if (!conn.__doodleDiagnosticStages) conn.__doodleDiagnosticStages = new Set();
+    conn.__doodleDiagnosticStages.add(stage);
+    conn.on('open', () => this._diagnostic(stage, { type: 'open', peer: conn.peer, metadata: conn.metadata || {} }));
+    conn.on('iceStateChanged', (state) => this._diagnostic(stage, { type: 'ice', peer: conn.peer, state }));
+    conn.on('error', (err) => this._diagnostic(stage, { type: 'error', peer: conn.peer, message: String(err && err.message || err || 'connection error'), metadata: conn.metadata || {} }));
+    conn.on('close', () => this._diagnostic(stage, { type: 'close', peer: conn.peer, metadata: conn.metadata || {} }));
+  }
   _wire(conn) {
+    this._watchConnection(conn, `${this.mode}-active`);
     conn.on('data', (msg) => { this.stats.recv++; if (!msg || typeof msg !== 'object') return; this._route(msg, conn.peer); });
     conn.on('close', () => this._drop(conn.peer));
-    conn.on('error', () => this._drop(conn.peer));
+    conn.on('error', (err) => { this._emit('connectionError', { peer: conn.peer, message: String(err && err.message || err || 'connection failed'), metadata: conn.metadata || {} }); this._drop(conn.peer); });
+    conn.on('iceStateChanged', (state) => this._emit('iceStateChanged', { peer: conn.peer, state }));
   }
   _drop(pid) {
     if (this.leaving || !this.conns.has(pid)) return; this.conns.delete(pid);
@@ -60,16 +95,16 @@ export class Net {
   // ---- lobby creation / joining ----
   async host({ isPublic = false, code = null } = {}) {
     this.leave(); this.isHost = true; this.isPublic = isPublic;
-    if (code) { this.code = String(code).toUpperCase(); this.peer = await this._newPeer(PREFIX + this.code); }
+    if (code) { this.code = String(code).toUpperCase(); this.peer = await this._newPeer(this.hostPeerId(this.code)); }
     else if (isPublic) {
       for (let slot = 0; slot < PUBLIC_SLOTS; slot++) {
-        try { this.peer = await this._newPeer(PREFIX + 'PUB' + slot); this.code = 'PUB' + slot; break; } catch (e) { if (!(e && e.type === 'unavailable-id')) throw e; }
+        try { this.peer = await this._newPeer(this.hostPeerId('PUB' + slot)); this.code = 'PUB' + slot; break; } catch (e) { if (!(e && e.type === 'unavailable-id')) throw e; }
       }
       if (!this.peer) throw new Error('all public lobbies are busy - host a private one');
     } else {
       for (let tries = 0; tries < 3 && !this.peer; tries++) {
         this.code = makeCode();
-        try { this.peer = await this._newPeer(PREFIX + this.code); } catch (e) { if (!(e && e.type === 'unavailable-id') || tries === 2) throw e; }
+        try { this.peer = await this._newPeer(this.hostPeerId(this.code)); } catch (e) { if (!(e && e.type === 'unavailable-id') || tries === 2) throw e; }
       }
     }
     this.id = this.peer.id; this.hostId = this.id; this.connected = true; this.accepting = true;
@@ -79,7 +114,10 @@ export class Net {
   }
   // someone knocking: a quick-play probe is told how full we are and only seated once it says it is staying
   _incoming(conn) {
+    this._watchConnection(conn, `${this.mode}-incoming`);
     conn.on('open', () => {
+      const versionRefusal = this._versionRefusal(conn.metadata || {});
+      if (versionRefusal) { conn.send({ t: 'refused', d: versionRefusal }); try { conn.close(); } catch (e) { console.warn('[net] Failed to close incompatible peer connection', e); } return; }
       // a full lobby still says who it is, so the lobby list can show it
       if (!this.accepting || this.conns.size >= this.maxPlayers - 1) { conn.send({ t: 'refused', d: { reason: this.accepting ? 'that lobby is full' : 'that lobby is closed', code: this.aliasCode || this.code, players: this.conns.size + 1, max: this.maxPlayers, inMatch: !!this.inMatch, hostName: this.hostName } }); setTimeout(() => { try { conn.close(); } catch (e) { /* ignore */ } }, 600); return; }
       const seat = () => { if (this.conns.has(conn.peer)) return; this.conns.set(conn.peer, conn); this._wire(conn); if (this.onPeerJoin) this.onPeerJoin(conn.peer, conn.metadata || {}); };
@@ -97,7 +135,7 @@ export class Net {
     if (!this.isHost || this.alias || this._aliasTimer) return;
     const attempt = async () => {
       this._aliasTimer = null; if (!this.isHost || this.alias) return;
-      try { const peer = await this._newPeer(PREFIX + code); if (!this.isHost) { peer.destroy(); return; } this.alias = peer; this.aliasCode = code; peer.on('connection', (conn) => this._incoming(conn)); if (this.onAlias) this.onAlias(code); }
+      try { const peer = await this._newPeer(this.hostPeerId(code)); if (!this.isHost) { peer.destroy(); return; } this.alias = peer; this.aliasCode = code; peer.on('connection', (conn) => this._incoming(conn)); if (this.onAlias) this.onAlias(code); }
       catch (e) { if (--tries > 0) this._aliasTimer = setTimeout(attempt, 6000); }
     };
     this._aliasTimer = setTimeout(attempt, 1500);
@@ -108,15 +146,15 @@ export class Net {
     this.peer = await this._newPeer(null);
     this.id = this.peer.id; this._keepAlive(this.peer);
     // a lobby that changed hosts lives on a generation code; the plain code still finds it
-    const base = code.replace(/-\d+$/, ''); const ids = [code, ...['-1', '-2', '-3'].map((suf) => base + suf).filter((c) => c !== code)].map((c) => PREFIX + c);
-    let res; try { res = await this._knockAny(ids, meta, JOIN_TIMEOUT); } catch (e) { this.leave(); throw e; }
-    const { hostId, conn, welcome } = res; this._adopt(hostId, conn, welcome); this.code = (welcome && welcome.code) || hostId.slice(PREFIX.length); return this.code;
+    const base = code.replace(/-\d+$/, ''); const ids = [code, ...['-1', '-2', '-3'].map((suf) => base + suf).filter((c) => c !== code)].map((c) => this.hostPeerId(c));
+    let res; try { res = await this._knockAny(ids, this.compatMetadata(meta), JOIN_TIMEOUT); } catch (e) { this.leave(); throw e; }
+    const { hostId, conn, welcome } = res; this._adopt(hostId, conn, welcome); this.code = (welcome && welcome.code) || this.codeFromPeerId(hostId); return this.code;
   }
   // try every public slot at the same time and take the first host that says welcome
   async quickJoin(meta = {}, onStatus = null) {
     this.leave(); this.isHost = false; this.peer = await this._newPeer(null); this.id = this.peer.id; this._keepAlive(this.peer);
     if (onStatus) onStatus('正在寻找开放的大厅…');
-    const ids = []; for (let i = 0; i < PUBLIC_SLOTS; i++) for (const suf of ['', '-1', '-2', '-3']) ids.push(PREFIX + 'PUB' + i + suf);
+    const ids = []; for (let i = 0; i < PUBLIC_SLOTS; i++) for (const suf of ['', '-1', '-2', '-3']) ids.push(this.hostPeerId('PUB' + i + suf));
     const winner = await new Promise((resolve) => {
       let pending = ids.length, done = false; const attempts = [], offers = []; let gather = null;
       const pick = () => { if (!offers.length) return null; offers.sort((a, b) => (b.welcome.players || 0) - (a.welcome.players || 0)); return offers[0]; };
@@ -125,9 +163,10 @@ export class Net {
       const onErr = (err) => { if (err && err.type === 'peer-unavailable') { const a = attempts.find((x) => x.hostId === idFromError(err)); if (a) failOne(a); } };
       this.peer.on('error', onErr);
       const timer = setTimeout(settle, QUICK_TIMEOUT);
-      const probeMeta = { ...meta, probe: true };
+      const probeMeta = this.compatMetadata({ ...meta, probe: true });
       for (const hostId of ids) {
         let conn; try { conn = this.peer.connect(hostId, { reliable: true, serialization: 'json', metadata: probeMeta }); } catch (e) { pending--; continue; }
+        this._watchConnection(conn, `${this.mode}-probe`);
         const a = { conn, hostId, done: false }; attempts.push(a);
         conn.on('data', (msg) => { if (!msg || a.done) return; if (msg.t === 'welcome') { a.done = true; pending--; offers.push({ conn, hostId, welcome: msg.d }); if (onStatus) onStatus(`找到 ${offers.length} 个开放大厅…`); if (pending <= 0) settle(); else if (!gather) gather = setTimeout(settle, 1500); } else if (msg.t === 'refused') failOne(a); });
         conn.on('error', () => failOne(a)); conn.on('close', () => failOne(a));
@@ -136,14 +175,14 @@ export class Net {
     });
     if (!winner) { this.leave(); throw new Error('no open public lobbies'); }
     winner.conn.send({ t: 'stay' });
-    this._adopt(winner.hostId, winner.conn, winner.welcome); this.code = (winner.welcome && winner.welcome.code) || winner.hostId.slice(PREFIX.length); return this.code;
+    this._adopt(winner.hostId, winner.conn, winner.welcome); this.code = (winner.welcome && winner.welcome.code) || this.codeFromPeerId(winner.hostId); return this.code;
   }
   // knock on several ids at once; the first welcome wins, a refusal or a missing lobby on every one fails
   // a look at every public lobby: who is hosting, how full, whether a match is on. Nothing is joined.
   async listLobbies(meta = {}, onStatus = null) {
     if (this.active) throw new Error('leave the lobby first');
     const peer = await this._newPeer(null);
-    const ids = []; for (let i = 0; i < PUBLIC_SLOTS; i++) for (const suf of ['', '-1', '-2', '-3']) ids.push(PREFIX + 'PUB' + i + suf);
+    const ids = []; for (let i = 0; i < PUBLIC_SLOTS; i++) for (const suf of ['', '-1', '-2', '-3']) ids.push(this.hostPeerId('PUB' + i + suf));
     const found = await new Promise((resolve) => {
       let pending = ids.length, done = false; const attempts = [], offers = []; let gather = null;
       const settle = () => { if (done) return; done = true; clearTimeout(timer); clearTimeout(gather); peer.off('error', onErr); for (const a of attempts) { try { a.conn.close(); } catch (e) { /* ignore */ } } resolve(offers); };
@@ -151,11 +190,12 @@ export class Net {
       const onErr = (err) => { if (err && err.type === 'peer-unavailable') { const a = attempts.find((x) => x.hostId === idFromError(err)); if (a) failOne(a); } };
       peer.on('error', onErr);
       const timer = setTimeout(settle, QUICK_TIMEOUT);
-      const probeMeta = { ...meta, probe: true };
+      const probeMeta = this.compatMetadata({ ...meta, probe: true });
       for (const hostId of ids) {
         let conn; try { conn = peer.connect(hostId, { reliable: true, serialization: 'json', metadata: probeMeta }); } catch (e) { pending--; continue; }
+        this._watchConnection(conn, `${this.mode}-list-probe`);
         const a = { conn, hostId, done: false }; attempts.push(a);
-        conn.on('data', (msg) => { if (!msg || a.done) return; if (msg.t === 'welcome' || msg.t === 'refused') { a.done = true; pending--; const d = msg.d || {}; offers.push({ id: hostId.slice(PREFIX.length), code: d.code || hostId.slice(PREFIX.length), players: d.players || 0, max: d.max || 10, inMatch: !!d.inMatch, hostName: d.hostName || '', full: msg.t === 'refused' }); if (onStatus) onStatus(`找到 ${offers.length} 个…`); if (pending <= 0) settle(); else if (!gather) gather = setTimeout(settle, 2200); } });
+        conn.on('data', (msg) => { if (!msg || a.done) return; if (msg.t === 'welcome' || msg.t === 'refused') { a.done = true; pending--; const d = msg.d || {}; offers.push({ id: this.codeFromPeerId(hostId), code: d.code || this.codeFromPeerId(hostId), players: d.players || 0, max: d.max || 10, inMatch: !!d.inMatch, hostName: d.hostName || '', full: msg.t === 'refused' }); if (onStatus) onStatus(`找到 ${offers.length} 个…`); if (pending <= 0) settle(); else if (!gather) gather = setTimeout(settle, 2200); } });
         conn.on('error', () => failOne(a)); conn.on('close', () => failOne(a));
       }
       if (pending <= 0) settle();
@@ -175,8 +215,9 @@ export class Net {
       const timer = setTimeout(() => finish(new Error('no answer from that lobby')), timeoutMs);
       for (const hostId of ids) {
         let conn; try { conn = this.peer.connect(hostId, { reliable: true, serialization: 'json', metadata: meta }); } catch (e) { pending--; continue; }
+        this._watchConnection(conn, `${this.mode}-join`);
         const a = { conn, hostId, done: false }; attempts.push(a);
-        conn.on('data', (msg) => { if (!msg || a.done) return; if (msg.t === 'welcome') { a.done = true; finish(null, { hostId, conn, welcome: msg.d }); } else if (msg.t === 'refused') failOne(a, new Error(msg.d && msg.d.reason || 'the lobby turned you away')); });
+        conn.on('data', (msg) => { if (!msg || a.done) return; if (msg.t === 'welcome') { a.done = true; finish(null, { hostId, conn, welcome: msg.d }); } else if (msg.t === 'refused') failOne(a, Object.assign(new Error(msg.d && msg.d.reason || 'the lobby turned you away'), { details: msg.d || {} })); });
         conn.on('error', (e) => failOne(a, e instanceof Error ? e : new Error('could not connect'))); conn.on('close', () => failOne(a, null));
       }
       if (pending <= 0) finish(lastErr || new Error('no lobby with that code'));
@@ -185,12 +226,13 @@ export class Net {
   _knock(hostId, meta, timeoutMs) {
     return new Promise((resolve, reject) => {
       let conn; try { conn = this.peer.connect(hostId, { reliable: true, serialization: 'json', metadata: meta }); } catch (e) { return reject(new Error('could not start a connection')); }
+      this._watchConnection(conn, `${this.mode}-join`);
       let done = false;
       const finish = (err, val) => { if (done) return; done = true; clearTimeout(timer); this.peer.off('error', onErr); if (err) { try { conn.close(); } catch (e) { /* ignore */ } reject(err); } else resolve(val); };
       const timer = setTimeout(() => finish(new Error('no answer from that lobby')), timeoutMs);
       const onErr = (err) => { if (err && err.type === 'peer-unavailable' && idFromError(err) === hostId) finish(new Error('no lobby with that code')); };
       this.peer.on('error', onErr);
-      conn.on('data', (msg) => { if (!msg) return; if (msg.t === 'welcome') finish(null, { conn, welcome: msg.d }); else if (msg.t === 'refused') finish(new Error(msg.d && msg.d.reason || 'the lobby turned you away')); });
+      conn.on('data', (msg) => { if (!msg) return; if (msg.t === 'welcome') finish(null, { conn, welcome: msg.d }); else if (msg.t === 'refused') finish(Object.assign(new Error(msg.d && msg.d.reason || 'the lobby turned you away'), { details: msg.d || {} })); });
       conn.on('error', (e) => finish(e instanceof Error ? e : new Error('could not connect')));
       conn.on('close', () => finish(new Error('the lobby closed the connection')));
     });

@@ -1,5 +1,7 @@
 # Doodle District
 
+[Chinese](README.zh-CN.md)
+
 A first-person survival shooter drawn in blue ballpoint on lined notebook paper. Grapple across
 rooftops and canyons, slice bullets back at the doodles that fired them, lob grenades, and see how
 many waves you can survive. Play alone, survive with friends, or fight them.
@@ -9,24 +11,65 @@ files: the paper, the ink outlines, the hatching, the enemies and the music are 
 
 ## Running it
 
-It is a static site, so any web server works. Locally:
+Recommended local game server:
 
 ```bash
-python3 serve.py 8910
+npm install
+npm run serve
 ```
 
-then open http://127.0.0.1:8910. On Vercel (or any static host) just deploy the folder as is.
+The Node server serves the game page and a local PeerJS signalling endpoint. It prints a LAN URL such as `http://192.168.1.23:8910`. Other players on the same LAN open that URL; they do not need to clone the repository or start their own server.
+
+The online menu has separate LAN Play and Public Play tabs. The public online toggle lives in the shared area. Turning it off disables only public quick play, public lobby creation, public lobby joining, and public lobby refresh; LAN play keeps working. LAN play uses local signalling and browser WebRTC P2P, so it can create public or private LAN lobbies, quick-match open LAN lobbies, refresh the LAN lobby list, or join a specific LAN lobby by code without internet access. When public online is enabled, LAN P2P may use STUN assistance for candidate discovery; when it is disabled, LAN play uses only local LAN candidates.
+
+Docker uses the same Node LAN server:
+
+```bash
+docker compose up --build
+```
+
+It exposes `http://<host-lan-ip>:8910`, including the `/peerjs` signalling endpoint required for offline LAN multiplayer.
+
+Lightweight static-only fallback:
+
+```bash
+python3 serve.py --lan 8910
+```
+
+The Python server is useful for static page testing and public online play, but it does not provide offline LAN signalling. Use `npm run serve` for offline LAN multiplayer.
+
+If LAN devices cannot open the page, check that all devices are on the same network, macOS or system firewall allows incoming Node/Python connections, and the router has not enabled Wi-Fi client isolation.
+
+Public static deployment:
+
+```bash
+npm run build
+```
+
+Deploy the generated `dist/` directory to Cloudflare Workers Static Assets, Cloudflare Pages, Vercel, or another static host. Do not deploy the whole repository for public play; `dist/` contains only the runtime files needed by the browser.
+
+Cloudflare Workers deployment uses `wrangler.jsonc` and requires these GitHub secrets when using the included workflow:
+
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+
+Public static deployments do not provide LAN play. To use LAN play, start the local signaling service from the source code with `npm run serve` or Docker on your LAN, then have other players open that local service URL.
 
 ## Modes
 
 - **Solo**: survive the waves. Bosses every fifth wave, checkpoints unlock at wave 5, 10, 15...
+- **Training Range**: practice shooting, movement, moving targets, dummy targets, and grappling routes without spawning normal enemies.
 - **Free for all**: up to ten players, first to 20 kills, with a ten minute cap shown on screen that starts once a second player is in. Anyone in the lobby can start. After the death cam a press of any button brings you back with a two second shield; two and a half minutes without input gets you kicked, with a one-click rejoin. Health
   regenerates after a few seconds out of combat (not while sprinting), so only ammo drops in.
 
 Multiplayer is peer-to-peer over WebRTC (PeerJS), so it works from a static host with no game
 server. Under PLAY ONLINE you can Quick Play (joins an open public lobby, or opens one for you),
-create a public or private lobby, or join a friend's lobby with their five letter code. People can
-join a match already in progress. The host's browser keeps score; each player runs their own body.
+create a public or private lobby, refresh open lobby lists, or join a friend's lobby with their five
+letter code. LAN and public online play use separate lobby discovery, so a LAN public lobby is only
+matched by players using the same LAN game URL. People can join a match already in progress. The
+host's browser keeps score; each player runs their own body.
+
+Online lobby discovery is version-scoped. The full app version comes from `package.json`, while the signaling compatibility version uses major.minor. Different compatibility versions use different lobby prefixes and usually cannot see each other; patch versions are expected to remain compatible.
 
 ## Controls
 
@@ -50,7 +93,9 @@ On-screen hints follow whichever device you touched last.
 
 ## Weapons and gear
 
-Rifle, shotgun, sniper (with scope) and a katana. Holding block with the katana parries
+Rifle, shotgun, sniper (with scope), revolver, and a katana. The main menu has a four-slot loadout editor: one gun slot, one melee slot, and two secondary slots that can hold either guns or melee weapons. A loadout cannot use the same weapon twice, and the current weapon registry is shared by solo, training, and online play.
+
+Holding block with the katana parries
 some incoming bullets and returns a share of them. Katana kills charge a gauge; when it is lit you
 can dash to a marked enemy and execute it (solo only). Grenades bounce, then go off in a thick orange blast that scorches the paper; holding the
 button winds up a longer throw and shows the arc. The grapple runs on breath: hanging drains it,
@@ -69,6 +114,8 @@ slashes and turns some bullets aside, and the guns use their own damage table; t
   market of striped stalls and hanging piñatas, a taco cart, cacti and mesas all around. Pots, crates,
   barrels, cacti and piñatas all break under bullets, blades and blasts; piñatas drop tacos, which are
   the health pickups here. The map plays its own mariachi waltz.
+- **Doodle Training Range**: a fixed practice arena with shooting lanes, static targets, moving
+  targets, dummy targets, a central building, and supported grappling platforms.
 
 Pick the map on the main menu for solo; the host picks it in the lobby for a match, and everyone
 starts in a different spot.

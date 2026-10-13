@@ -63,15 +63,17 @@ class ViewModel {
 }
 
 const GUNS = {
-  rifle: { name: '步枪', hint: '全自动 · 让红点对准他们', kind: 'rifle', magSize: 35, reserve: 175, maxReserve: 350, interval: 1 / 11, damage: 24, headMul: 2.6, pellets: 1, spread: 0.016, adsSpread: 0.0034, spreadKick: 0.009, spreadMax: 0.075, adsFov: 58, sight: [0, 0.12, -0.05, 0.3], camKick: [0.009, 0.0034], modelKick: [0.25, 0.3, 2.4, -3.2, 0.9, 1.2], fovKick: 1.2, reloadDur: 1.45, reloadType: 'mag', auto: true, falloff: null, tracer: 0.02, flashScale: 1, sound: 'shot', shell: [0.02, INK.ORANGE], moveSpread: 0.0012, pvp: [19, 1.8, null] },
-  shotgun: { name: '霰弹枪', hint: '泵动 · 近距离威力惊人', kind: 'shotgun', magSize: 6, reserve: 36, maxReserve: 72, interval: 0.78, damage: 19, headMul: 1.8, pellets: 10, spread: 0.062, adsSpread: 0.034, spreadKick: 0, spreadMax: 0.1, adsFov: 68, sight: [0, 0.095, -1.0, 0.52], camKick: [0.05, 0.012], modelKick: [0.4, 0.6, 5, -9, 2, 3], fovKick: 4, reloadDur: 0.45, reloadType: 'shells', auto: false, falloff: [11, 32, 0.22], tracer: 0.014, flashScale: 1.9, sound: 'shotgunFire', shell: [0.035, INK.RED], moveSpread: 0.0006, cycleDur: 0.45, pvp: [16, 1.6, [9, 26, 0.15]] },
-  sniper: { name: '狙击枪', hint: '栓动狙击 · 一枪一个擦除', kind: 'sniper', scope: true, magSize: 5, reserve: 25, maxReserve: 50, interval: 0.2, damage: 150, headMul: 3, pellets: 1, spread: 0.075, adsSpread: 0.0004, spreadKick: 0.05, spreadMax: 0.14, adsFov: 20, sight: [0, 0.135, 0, 0.42], camKick: [0.055, 0.008], modelKick: [0.25, 0.8, 4.5, -11, 1.2, 2], fovKick: 4.5, reloadDur: 2.1, reloadType: 'mag', auto: false, falloff: null, tracer: 0.03, flashScale: 1.7, sound: 'sniperFire', shell: [0.03, INK.ORANGE], moveSpread: 0.004, cycleDur: 0.85, pvp: [150, 1.5, null] },
-  revolver: { name: '左轮手枪', hint: '手炮 · 爆头即擦除', kind: 'revolver', magSize: 6, reserve: 36, maxReserve: 72, interval: 0.3, damage: 62, headMul: 3, pellets: 1, spread: 0.006, adsSpread: 0.002, spreadKick: 0.02, spreadMax: 0.06, adsFov: 52, sight: [0, 0.08, -0.34, 0.42], camKick: [0.038, 0.007], modelKick: [0.3, 0.9, 3.2, -10, 1.5, 2.5], fovKick: 2.5, reloadDur: 1.9, reloadType: 'cylinder', auto: false, falloff: null, tracer: 0.026, flashScale: 1.35, sound: 'revolver', shell: null, moveSpread: 0.0015, pvp: [52, 2.9, [9, 34, 0.42]] },
+  rifle: { nameKey: 'weapon.rifle.name', hintKey: 'weapon.rifle.hint', kind: 'rifle', magSize: 35, reserve: 175, maxReserve: 350, interval: 1 / 11, damage: 24, headMul: 2.6, pellets: 1, spread: 0.016, adsSpread: 0.0034, spreadKick: 0.009, spreadMax: 0.075, adsFov: 58, sight: [0, 0.12, -0.05, 0.3], camKick: [0.009, 0.0034], modelKick: [0.25, 0.3, 2.4, -3.2, 0.9, 1.2], fovKick: 1.2, reloadDur: 1.45, reloadType: 'mag', auto: true, falloff: null, tracer: 0.02, flashScale: 1, sound: 'shot', shell: [0.02, INK.ORANGE], moveSpread: 0.0012, pvp: [19, 1.8, null] },
+  shotgun: { nameKey: 'weapon.shotgun.name', hintKey: 'weapon.shotgun.hint', kind: 'shotgun', magSize: 6, reserve: 36, maxReserve: 72, interval: 0.78, damage: 19, headMul: 1.8, pellets: 10, spread: 0.062, adsSpread: 0.034, spreadKick: 0, spreadMax: 0.1, adsFov: 68, sight: [0, 0.095, -1.0, 0.52], camKick: [0.05, 0.012], modelKick: [0.4, 0.6, 5, -9, 2, 3], fovKick: 4, reloadDur: 0.45, reloadType: 'shells', auto: false, falloff: [11, 32, 0.22], tracer: 0.014, flashScale: 1.9, sound: 'shotgunFire', shell: [0.035, INK.RED], moveSpread: 0.0006, cycleDur: 0.45, pvp: [16, 1.6, [9, 26, 0.15]] },
+  sniper: { nameKey: 'weapon.sniper.name', hintKey: 'weapon.sniper.hint', kind: 'sniper', scope: true, magSize: 5, reserve: 25, maxReserve: 50, interval: 0.2, damage: 150, headMul: 3, pellets: 1, spread: 0.075, adsSpread: 0.0004, spreadKick: 0.05, spreadMax: 0.14, adsFov: 20, sight: [0, 0.135, 0, 0.42], camKick: [0.055, 0.008], modelKick: [0.25, 0.8, 4.5, -11, 1.2, 2], fovKick: 4.5, reloadDur: 2.1, reloadType: 'mag', auto: false, falloff: null, tracer: 0.03, flashScale: 1.7, sound: 'sniperFire', shell: [0.03, INK.ORANGE], moveSpread: 0.004, cycleDur: 0.85, pvp: [150, 1.5, null] },
+  revolver: { nameKey: 'weapon.revolver.name', hintKey: 'weapon.revolver.hint', kind: 'revolver', magSize: 6, reserve: 36, maxReserve: 72, interval: 0.3, damage: 62, headMul: 3, pellets: 1, spread: 0.006, adsSpread: 0.002, spreadKick: 0.02, spreadMax: 0.06, adsFov: 52, sight: [0, 0.08, -0.34, 0.42], camKick: [0.038, 0.007], modelKick: [0.3, 0.9, 3.2, -10, 1.5, 2.5], fovKick: 2.5, reloadDur: 1.9, reloadType: 'cylinder', auto: false, falloff: null, tracer: 0.026, flashScale: 1.35, sound: 'revolver', shell: null, moveSpread: 0.0015, pvp: [52, 2.9, [9, 34, 0.42]] },
 };
 
 export class Gun extends ViewModel {
   constructor(ctx, type) {
     super(ctx); Object.assign(this, GUNS[type]); this.isGun = true; this.mag = this.magSize;
+    this.name = ctx.i18n ? ctx.i18n.t(this.nameKey) : this.nameKey;
+    this.hint = ctx.i18n ? ctx.i18n.t(this.hintKey) : this.hintKey;
     this.fireT = 0; this.reloading = false; this.reloadT = 0; this.spreadCur = this.spread; this.flashT = 0; this.pumpT = 0; this.racked = false; this.needPump = false;
     this.mat = makeInkMaterial({ ink: INK.BLUE }); this.dark = makeInkMaterial({ ink: INK.BLACK }); this.red = makeInkMaterial({ ink: INK.RED, fill: true });
     this.build(); this.setSight(...this.sight);
@@ -147,13 +149,15 @@ export class Gun extends ViewModel {
     if (this.mag === 0 && this.reloadType === 'mag') setTimeout(() => { if (this.mag === 0 && !this.reloading) this.startReload(); }, 250);
   }
   fireRay(origin, dir) {
-    const ctx = this.ctx; const hitE = ctx.enemies.raycast(origin, dir, 300), hitW = ctx.world.raycast(origin, dir, 300, SEE_THROUGH); let end, hit = false;
+    const ctx = this.ctx; const hitE = ctx.enemies.raycast(origin, dir, 300), hitT = ctx.training && ctx.game.mode === 'training' ? ctx.training.raycast(origin, dir, 300) : null, hitW = ctx.world.raycast(origin, dir, 300, SEE_THROUGH); let end, hit = false;
     // other players in a versus match are targets too; the closest thing along the ray wins
     const hitP = ctx.raycastPlayers ? ctx.raycastPlayers(origin, dir, 300) : null;
     if (hitP && (!hitE || hitP.dist < hitE.dist) && (!hitW || hitP.dist < hitW.dist)) {
       end = hitP.point; const crit = hitP.part === 'head'; const pv = this.pvp || [this.damage, this.headMul, this.falloff]; let d = pv[0] * (crit ? pv[1] : 1);
       if (pv[2]) d *= clamp(1 - (hitP.dist - pv[2][0]) / (pv[2][1] - pv[2][0]), pv[2][2], 1);
       ctx.hitPlayer(hitP.player, d, { point: hitP.point, dir, part: hitP.part, source: this.kind, crit, dist: hitP.dist }); hit = true;
+    } else if (hitT && (!hitE || hitT.dist < hitE.dist) && (!hitW || hitT.dist < hitW.dist)) {
+      end = hitT.point; ctx.training.damage(hitT.target, this.damage, { ...hitT, source: this.kind }); hit = true;
     } else if (hitW && hitW.box && hitW.box.data.breakable && (!hitE || hitW.dist < hitE.dist) && ctx.breakHit) {
       end = hitW.point; ctx.breakHit(hitW.box.data.breakable, this.damage, hitW.point, dir); hit = true;
     } else if (hitE && (!hitW || hitE.dist < hitW.dist)) {
@@ -251,7 +255,7 @@ export class Sniper extends Gun {
 
 export class Katana extends ViewModel {
   constructor(ctx) {
-    super(ctx); this.name = '太刀'; this.hint = '挥砍 · 按住瞄准格挡并反弹子弹'; this.kind = 'katana';
+    super(ctx); this.nameKey = 'weapon.katana.name'; this.hintKey = 'weapon.katana.hint'; this.name = ctx.i18n ? ctx.i18n.t(this.nameKey) : this.nameKey; this.hint = ctx.i18n ? ctx.i18n.t(this.hintKey) : this.hintKey; this.kind = 'katana';
     this.basePos.set(0.27, -0.25, -0.4); this.baseRot.set(0.75, 0.15, -0.35); this.aimPos.copy(this.basePos);
     this.slashT = 0; this.slashDur = 0.27; this.combo = 0; this.comboT = 0; this.blocking = false; this.blockT = 0; this.blockAmt = 0; this.hitDone = false; this.cooldown = 0; this.damage = 75;
     // guard pose: the sword simply comes in close to the face, held upright
@@ -345,6 +349,10 @@ export class Katana extends ViewModel {
     _v2.copy(P.forward); _v.set(-P.forward.z, 0, P.forward.x).multiplyScalar(s * 0.7); _v2.add(_v).y -= 0.35; _v2.normalize();
     let any = false;
     for (const h of hits) { any = true; const point = h.enemy.center.clone(); point.y += rand(-0.2, 0.4); ctx.enemies.damage(h.enemy, this.damage, { point, dir: _v2.clone(), part: 'torso', source: 'katana', crit: false, slashDir: s }); }
+    if (ctx.training && ctx.game.mode === 'training') {
+      const hit = ctx.training.raycast(P.eye, P.forward, 3.2);
+      if (hit) { any = true; ctx.training.damage(hit.target, this.damage, { ...hit, source: 'katana' }); }
+    }
     if (ctx.playersInArc) for (const t of ctx.playersInArc(P.eye, P.forward, 3.0, Math.cos(0.95))) { any = true; ctx.hitPlayer(t, 55, { point: t.center.clone(), dir: _v2.clone(), part: 'torso', source: 'katana', crit: false }); }
     if (ctx.cutRopes && ctx.cutRopes(P.eye, P.forward, 3.4)) any = true;
     if (ctx.breakablesInArc) for (const br of ctx.breakablesInArc(P.eye, P.forward, 3.2, Math.cos(1.0))) { any = true; ctx.breakHit(br, this.damage, br.pos.clone(), _v2.clone()); }
@@ -367,4 +375,35 @@ export class Katana extends ViewModel {
       if (on) { const f = clamp((lv - sm.at) / 0.28, 0.2, 1); sm.mesh.scale.set(1, 0.35 + 0.65 * f, 0.4 + 0.6 * f); }
     }
   }
+}
+
+// The registry is the extension point for new weapons; gameplay code only needs a stable id.
+export const WEAPON_REGISTRY = {
+  rifle: { id: 'rifle', nameKey: 'weapon.rifle.name', hintKey: 'weapon.rifle.hint', deathNameKey: 'weapon.rifle.death', category: 'gun', prop: 'rifle', tags: ['automatic', 'mid-range'], create: (ctx) => new Rifle(ctx) },
+  shotgun: { id: 'shotgun', nameKey: 'weapon.shotgun.name', hintKey: 'weapon.shotgun.hint', deathNameKey: 'weapon.shotgun.death', category: 'gun', prop: 'shotgun', tags: ['shotgun', 'close-range'], create: (ctx) => new Shotgun(ctx) },
+  sniper: { id: 'sniper', nameKey: 'weapon.sniper.name', hintKey: 'weapon.sniper.hint', deathNameKey: 'weapon.sniper.death', category: 'gun', prop: 'sniper', tags: ['sniper', 'long-range'], create: (ctx) => new Sniper(ctx) },
+  revolver: { id: 'revolver', nameKey: 'weapon.revolver.name', hintKey: 'weapon.revolver.hint', deathNameKey: 'weapon.revolver.death', category: 'gun', prop: 'pistol', tags: ['handgun', 'precision'], create: (ctx) => new Revolver(ctx) },
+  katana: { id: 'katana', nameKey: 'weapon.katana.name', hintKey: 'weapon.katana.hint', deathNameKey: 'weapon.katana.death', category: 'melee', prop: 'blade', tags: ['blade', 'parry'], create: (ctx) => new Katana(ctx) },
+};
+
+export const WEAPON_IDS = Object.keys(WEAPON_REGISTRY);
+
+export function createWeapon(ctx, id) {
+  const entry = WEAPON_REGISTRY[id];
+  if (!entry) throw new Error(`unknown weapon: ${id}`);
+  const weapon = entry.create(ctx);
+  weapon.id = id;
+  weapon.category = entry.category;
+  return weapon;
+}
+
+export function weaponMeta(id, i18n = null) {
+  const meta = WEAPON_REGISTRY[id];
+  if (!meta || !i18n) return meta || null;
+  return {
+    ...meta,
+    name: i18n.t(meta.nameKey),
+    hint: i18n.t(meta.hintKey),
+    deathName: i18n.t(meta.deathNameKey),
+  };
 }
