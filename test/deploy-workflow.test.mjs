@@ -14,7 +14,8 @@ assert.match(workflow, /node test\/lobby-actions\.test\.mjs/);
 assert.match(workflow, /node test\/online-ui-state\.test\.mjs/);
 assert.match(workflow, /node test\/i18n\.test\.mjs/);
 assert.match(workflow, /npm run build/);
-assert.match(workflow, /cloudflare\/wrangler-action@v3/);
+assert.match(workflow, /cloudflare\/wrangler-action@v4/);
+assert.match(workflow, /wranglerVersion:\s*["']?4["']?/);
 assert.match(workflow, /CLOUDFLARE_API_TOKEN/);
 assert.match(workflow, /CLOUDFLARE_ACCOUNT_ID/);
 
