@@ -53,5 +53,5 @@
 - 修改公网部署、构建产物或 Cloudflare 配置后，运行 `node test/build-static.test.mjs`、`node test/cloudflare-config.test.mjs`、`node test/deploy-workflow.test.mjs`、`npm run build`、`node --check scripts/build-static.mjs` 和 `git diff --check`。
 - 公网静态部署只能发布 `dist/`，不得直接发布整个仓库目录；公网部署不提供离线局域网信令，LAN 功能必须依赖本地 `npm run serve` 或 Docker 服务提供 `/peerjs` 和 `/lan-health`。
 - LAN 联机必须保持浏览器 WebRTC P2P，不得改为本地 relay；公网开关开启时可以给 LAN PeerJS options 提供 STUN 辅助，关闭时必须保持 `iceServers: []`。
-- 排查 LAN 联机失败时，优先查看浏览器控制台的 `[network diagnostic]`、`[network] LAN PeerJS config` 和 ICE 状态，不得在没有连接阶段证据时直接更换信令或传输架构。
+- 排查 LAN 联机失败时，优先基于 `Net` 的 `diagnostic`、`iceStateChanged` 和 `connectionError` 事件临时增加诊断输出，不得在没有连接阶段证据时直接更换信令或传输架构；常规发布版本不得向浏览器控制台输出网络调试日志。
 - 修改 `serve.py` 或静态资源加载策略后，运行 `python3 test/static-server-health.py` 验证关键资源并发访问。

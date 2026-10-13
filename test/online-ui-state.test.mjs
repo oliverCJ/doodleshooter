@@ -26,7 +26,7 @@ assert.match(networkConfig, /SIGNALING_VERSION_LABEL/, 'networkConfig should inc
 assert.match(netSource, /compatMetadata/, 'Net should attach version metadata to outgoing connections');
 assert.match(netSource, /version mismatch/, 'Net should refuse incompatible signaling versions before seating peers');
 assert.match(main, /i18n\.t\('pvp\.lanDirectFailed'\)/, 'LAN connection failures should explain that direct P2P setup failed');
-assert.match(main, /\[network diagnostic\]/, 'LAN connection diagnostics should be visible in the browser console');
+assert.doesNotMatch(main, /\[network diagnostic\]|console\.info\(`\[network\]|LAN peer connection failed/, 'network diagnostics should not spam the browser console');
 assert.doesNotMatch(main, /querySelectorAll\('button'\)\) b\.disabled = false/, 'unlockButtons should not blindly re-enable every button');
 assert.doesNotMatch(main, /const ROSTER = \[/, 'wave roster should live in src/gameplay/waves.js');
 assert.doesNotMatch(main, /const MODIFIERS = \[/, 'wave modifiers should live in src/gameplay/waves.js');

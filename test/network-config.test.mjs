@@ -31,6 +31,7 @@ assert.equal(readPublicSignalingEnabled(s), true);
 assert.equal(prefixForMode('public', 'localhost'), `doodleshooter-${SIGNALING_VERSION_LABEL}-dev-`);
 assert.equal(prefixForMode('public', 'example.com'), `doodleshooter-${SIGNALING_VERSION_LABEL}-public-`);
 assert.equal(prefixForMode('lan', '192.168.1.20'), `doodleshooter-${SIGNALING_VERSION_LABEL}-lan-`);
+assert.match(`${prefixForMode('public', 'example.com')}PUB0`, /^[A-Za-z0-9_-]+$/, 'public lobby peer id should only use PeerJS-safe characters');
 
 const publicOptions = peerOptionsForMode('public', { hostname: 'game.example.com', protocol: 'https:' });
 assert.ok(publicOptions.config.iceServers.length >= 1);

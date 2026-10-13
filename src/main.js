@@ -485,24 +485,12 @@ async function _migrateHost() {
 net.on('refused', (d) => leaveOnline(d.reason));
 net.hostName = myName;
 net.setMode(PUBLIC_SIGNALING);
-net.on('diagnostic', (event) => {
-  console.warn('[network diagnostic]', {
-    stage: event.stage,
-    mode: event.mode,
-    type: event.type,
-    peer: event.peer || null,
-    state: event.state || null,
-    errorType: event.errorType || null,
-    message: event.message || null,
-    iceServers: event.options?.iceServers,
-  });
-});
+net.on('diagnostic', () => {});
 net.on('iceStateChanged', ({ state }) => {
   if (net.mode === LAN_SIGNALING && state === 'failed') lobbyActions().setStatus(i18n.t('pvp.lanDirectFailed'));
-  console.info(`[network] ${net.mode} ICE state: ${state}`);
 });
-net.on('connectionError', ({ message, metadata }) => {
-  if (net.mode === LAN_SIGNALING && !(metadata && metadata.probe)) console.warn(`[network] LAN peer connection failed: ${message}`);
+net.on('connectionError', ({ metadata }) => {
+  if (net.mode === LAN_SIGNALING && !(metadata && metadata.probe)) lobbyActions().setStatus(i18n.t('pvp.lanDirectFailed'));
 });
 net.onPeerJoin = (from, meta) => {
   const name = String(meta && meta.name || 'doodle').slice(0, 14);

@@ -1,8 +1,6 @@
 const esc = (value) => String(value ?? '').replace(/[&<>\"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[char]);
 
 export function createLobbyActions(deps) {
-  const log = deps.logger || console;
-
   function currentMode() {
     return deps.getOnlineTab();
   }
@@ -42,7 +40,6 @@ export function createLobbyActions(deps) {
 
   function useLanNetwork() {
     deps.net.setMode(deps.lanSignaling, deps.location, { allowStun: deps.getPublicSignalingEnabled() });
-    log.info('[network] LAN PeerJS config', { host: deps.net.peerOptions.host, port: deps.net.peerOptions.port, path: deps.net.peerOptions.path, iceServers: deps.net.peerOptions.config.iceServers.length });
   }
 
   async function refreshLanSignaling() {

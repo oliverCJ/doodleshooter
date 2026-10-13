@@ -8,6 +8,7 @@ const versionParts = pkg.version.split('.');
 assert.match(pkg.version, /^\d+\.\d+\.\d+$/, 'package.json version should use major.minor.patch');
 assert.equal(APP_VERSION, pkg.version, 'APP_VERSION should match package.json version');
 assert.equal(SIGNALING_VERSION, `${versionParts[0]}.${versionParts[1]}`, 'SIGNALING_VERSION should use package major.minor');
-assert.equal(SIGNALING_VERSION_LABEL, `v${SIGNALING_VERSION}`, 'SIGNALING_VERSION_LABEL should be prefixed with v');
+assert.equal(SIGNALING_VERSION_LABEL, `v${SIGNALING_VERSION.replaceAll('.', '-')}`, 'SIGNALING_VERSION_LABEL should be peer-id safe');
+assert.match(SIGNALING_VERSION_LABEL, /^[A-Za-z0-9_-]+$/, 'SIGNALING_VERSION_LABEL should only use PeerJS-safe id characters');
 
 console.log('version tests passed');

@@ -71,7 +71,6 @@ function makeDeps(overrides = {}) {
     onMapPick: (config) => calls.push(['onMapPick', config]),
     lobbyRows: () => [{ id: 'self-id', name: myName }],
     ffaTarget: 20,
-    logger: { info: (...args) => calls.push(['info', ...args]) },
     ...overrides,
   };
   return { deps, calls, lobby, lobbyLists, lobbyListBusy, statusNode, rowsNode, game, getScreen: () => screen };
@@ -169,5 +168,6 @@ function makeDeps(overrides = {}) {
 
 const source = readFileSync(new URL('../src/online/lobbyActions.js', import.meta.url), 'utf8');
 assert.doesNotMatch(source, /three|\.\.\/net\.js|\.\.\/hud\.js|document|window|localStorage/);
+assert.doesNotMatch(source, /logger|console|log\.info|\[network\]/, 'lobby actions should not write debug logs to the browser console');
 
 console.log('lobby-actions tests passed');
