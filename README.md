@@ -40,7 +40,20 @@ The Python server is useful for static page testing and public online play, but 
 
 If LAN devices cannot open the page, check that all devices are on the same network, macOS or system firewall allows incoming Node/Python connections, and the router has not enabled Wi-Fi client isolation.
 
-On Vercel or any static host, deploy the folder as is for public online play.
+Public static deployment:
+
+```bash
+npm run build
+```
+
+Deploy the generated `dist/` directory to Cloudflare Workers Static Assets, Cloudflare Pages, Vercel, or another static host. Do not deploy the whole repository for public play; `dist/` contains only the runtime files needed by the browser.
+
+Cloudflare Workers deployment uses `wrangler.jsonc` and requires these GitHub secrets when using the included workflow:
+
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+
+Public static deployments do not provide LAN play. To use LAN play, start the local signaling service from the source code with `npm run serve` or Docker on your LAN, then have other players open that local service URL.
 
 ## Modes
 
@@ -55,6 +68,8 @@ create a public or private lobby, refresh open lobby lists, or join a friend's l
 letter code. LAN and public online play use separate lobby discovery, so a LAN public lobby is only
 matched by players using the same LAN game URL. People can join a match already in progress. The
 host's browser keeps score; each player runs their own body.
+
+Online lobby discovery is version-scoped. The full app version comes from `package.json`, while the signaling compatibility version uses major.minor. Different compatibility versions use different lobby prefixes and usually cannot see each other; patch versions are expected to remain compatible.
 
 ## Controls
 

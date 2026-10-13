@@ -20,6 +20,12 @@ export function createLobbyActions(deps) {
   function friendlyError(err) {
     const message = String(err && err.message || err || '');
     if (!message) return deps.i18n.t('online.status.genericError');
+    const details = err && err.details || {};
+    if (/version mismatch/i.test(message)) {
+      const host = details.hostVersion || (details.hostSignalingVersion ? `${details.hostSignalingVersion}.x` : '?');
+      const client = details.clientVersion || (details.clientSignalingVersion ? `${details.clientSignalingVersion}.x` : '?');
+      return deps.i18n.t('online.status.versionMismatch', { host, client });
+    }
     if (/networking library/.test(message)) return deps.i18n.t('online.status.libraryError');
     if (/Negotiation of connection|could not connect|connection failed/i.test(message)) return deps.net.mode === deps.lanSignaling ? deps.i18n.t('pvp.lanDirectFailed') : deps.i18n.t('online.status.peerDirectFailed');
     if (/timed out|signalling/.test(message)) return deps.i18n.t('online.status.signalingFailed');

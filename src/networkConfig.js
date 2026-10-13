@@ -1,3 +1,5 @@
+import { SIGNALING_VERSION_LABEL } from './version.js';
+
 export const DEFAULT_PUBLIC_SIGNALING = true;
 export const PUBLIC_SIGNALING_KEY = 'doodle_public_signaling';
 export const PUBLIC_SIGNALING = 'public';
@@ -21,8 +23,8 @@ export function writePublicSignalingEnabled(storage = localStorage, enabled) {
 }
 
 export function prefixForMode(mode, hostname = location.hostname) {
-  if (mode === LAN_SIGNALING) return 'doodlelan-';
-  return LOCAL_HOST_RE.test(hostname) ? 'doodledev-' : 'doodledistrict-';
+  if (mode === LAN_SIGNALING) return `doodleshooter-${SIGNALING_VERSION_LABEL}-lan-`;
+  return LOCAL_HOST_RE.test(hostname) ? `doodleshooter-${SIGNALING_VERSION_LABEL}-dev-` : `doodleshooter-${SIGNALING_VERSION_LABEL}-public-`;
 }
 
 export function peerOptionsForMode(mode, loc = location, options = {}) {

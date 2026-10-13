@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build": "node scripts/build-static.mjs",
     "serve": "node server/lan-server.js --host 0.0.0.0 --port 8910",
     "serve:local": "node server/lan-server.js --host 127.0.0.1 --port 8910",
     "check:lan-server": "node test/lan-server-health.mjs"

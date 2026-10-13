@@ -8,6 +8,7 @@
 // host has answered with a welcome, so a full or closed lobby can be skipped for the next one.
 
 import { LAN_SIGNALING, PUBLIC_SIGNALING, peerOptionsForMode, prefixForMode } from './networkConfig.js';
+import { APP_VERSION, SIGNALING_VERSION } from './version.js';
 
 const PUBLIC_SLOTS = 16;
 const ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -31,6 +32,20 @@ export class Net {
     this.mode = mode === LAN_SIGNALING ? LAN_SIGNALING : PUBLIC_SIGNALING;
     this.prefix = prefixForMode(this.mode, loc.hostname);
     this.peerOptions = peerOptionsForMode(this.mode, loc, options);
+  }
+  compatMetadata(meta = {}) {
+    return { ...meta, appVersion: APP_VERSION, signalingVersion: SIGNALING_VERSION };
+  }
+  _versionRefusal(metadata = {}) {
+    if (metadata.signalingVersion === SIGNALING_VERSION) return null;
+    return {
+      reason: 'version mismatch',
+      code: this.aliasCode || this.code,
+      hostVersion: APP_VERSION,
+      hostSignalingVersion: SIGNALING_VERSION,
+      clientVersion: metadata.appVersion || '',
+      clientSignalingVersion: metadata.signalingVersion || '',
+    };
   }
   hostPeerId(code) { return this.prefix + String(code || '').toUpperCase(); }
   codeFromPeerId(id) { return String(id || '').startsWith(this.prefix) ? String(id).slice(this.prefix.length) : String(id || ''); }
@@ -101,6 +116,8 @@ export class Net {
   _incoming(conn) {
     this._watchConnection(conn, `${this.mode}-incoming`);
     conn.on('open', () => {
+      const versionRefusal = this._versionRefusal(conn.metadata || {});
+      if (versionRefusal) { conn.send({ t: 'refused', d: versionRefusal }); try { conn.close(); } catch (e) { console.warn('[net] Failed to close incompatible peer connection', e); } return; }
       // a full lobby still says who it is, so the lobby list can show it
       if (!this.accepting || this.conns.size >= this.maxPlayers - 1) { conn.send({ t: 'refused', d: { reason: this.accepting ? 'that lobby is full' : 'that lobby is closed', code: this.aliasCode || this.code, players: this.conns.size + 1, max: this.maxPlayers, inMatch: !!this.inMatch, hostName: this.hostName } }); setTimeout(() => { try { conn.close(); } catch (e) { /* ignore */ } }, 600); return; }
       const seat = () => { if (this.conns.has(conn.peer)) return; this.conns.set(conn.peer, conn); this._wire(conn); if (this.onPeerJoin) this.onPeerJoin(conn.peer, conn.metadata || {}); };
@@ -130,7 +147,7 @@ export class Net {
     this.id = this.peer.id; this._keepAlive(this.peer);
     // a lobby that changed hosts lives on a generation code; the plain code still finds it
     const base = code.replace(/-\d+$/, ''); const ids = [code, ...['-1', '-2', '-3'].map((suf) => base + suf).filter((c) => c !== code)].map((c) => this.hostPeerId(c));
-    let res; try { res = await this._knockAny(ids, meta, JOIN_TIMEOUT); } catch (e) { this.leave(); throw e; }
+    let res; try { res = await this._knockAny(ids, this.compatMetadata(meta), JOIN_TIMEOUT); } catch (e) { this.leave(); throw e; }
     const { hostId, conn, welcome } = res; this._adopt(hostId, conn, welcome); this.code = (welcome && welcome.code) || this.codeFromPeerId(hostId); return this.code;
   }
   // try every public slot at the same time and take the first host that says welcome
@@ -146,7 +163,7 @@ export class Net {
       const onErr = (err) => { if (err && err.type === 'peer-unavailable') { const a = attempts.find((x) => x.hostId === idFromError(err)); if (a) failOne(a); } };
       this.peer.on('error', onErr);
       const timer = setTimeout(settle, QUICK_TIMEOUT);
-      const probeMeta = { ...meta, probe: true };
+      const probeMeta = this.compatMetadata({ ...meta, probe: true });
       for (const hostId of ids) {
         let conn; try { conn = this.peer.connect(hostId, { reliable: true, serialization: 'json', metadata: probeMeta }); } catch (e) { pending--; continue; }
         this._watchConnection(conn, `${this.mode}-probe`);
@@ -173,7 +190,7 @@ export class Net {
       const onErr = (err) => { if (err && err.type === 'peer-unavailable') { const a = attempts.find((x) => x.hostId === idFromError(err)); if (a) failOne(a); } };
       peer.on('error', onErr);
       const timer = setTimeout(settle, QUICK_TIMEOUT);
-      const probeMeta = { ...meta, probe: true };
+      const probeMeta = this.compatMetadata({ ...meta, probe: true });
       for (const hostId of ids) {
         let conn; try { conn = peer.connect(hostId, { reliable: true, serialization: 'json', metadata: probeMeta }); } catch (e) { pending--; continue; }
         this._watchConnection(conn, `${this.mode}-list-probe`);
@@ -200,7 +217,7 @@ export class Net {
         let conn; try { conn = this.peer.connect(hostId, { reliable: true, serialization: 'json', metadata: meta }); } catch (e) { pending--; continue; }
         this._watchConnection(conn, `${this.mode}-join`);
         const a = { conn, hostId, done: false }; attempts.push(a);
-        conn.on('data', (msg) => { if (!msg || a.done) return; if (msg.t === 'welcome') { a.done = true; finish(null, { hostId, conn, welcome: msg.d }); } else if (msg.t === 'refused') failOne(a, new Error(msg.d && msg.d.reason || 'the lobby turned you away')); });
+        conn.on('data', (msg) => { if (!msg || a.done) return; if (msg.t === 'welcome') { a.done = true; finish(null, { hostId, conn, welcome: msg.d }); } else if (msg.t === 'refused') failOne(a, Object.assign(new Error(msg.d && msg.d.reason || 'the lobby turned you away'), { details: msg.d || {} })); });
         conn.on('error', (e) => failOne(a, e instanceof Error ? e : new Error('could not connect'))); conn.on('close', () => failOne(a, null));
       }
       if (pending <= 0) finish(lastErr || new Error('no lobby with that code'));
@@ -215,7 +232,7 @@ export class Net {
       const timer = setTimeout(() => finish(new Error('no answer from that lobby')), timeoutMs);
       const onErr = (err) => { if (err && err.type === 'peer-unavailable' && idFromError(err) === hostId) finish(new Error('no lobby with that code')); };
       this.peer.on('error', onErr);
-      conn.on('data', (msg) => { if (!msg) return; if (msg.t === 'welcome') finish(null, { conn, welcome: msg.d }); else if (msg.t === 'refused') finish(new Error(msg.d && msg.d.reason || 'the lobby turned you away')); });
+      conn.on('data', (msg) => { if (!msg) return; if (msg.t === 'welcome') finish(null, { conn, welcome: msg.d }); else if (msg.t === 'refused') finish(Object.assign(new Error(msg.d && msg.d.reason || 'the lobby turned you away'), { details: msg.d || {} })); });
       conn.on('error', (e) => finish(e instanceof Error ? e : new Error('could not connect')));
       conn.on('close', () => finish(new Error('the lobby closed the connection')));
     });

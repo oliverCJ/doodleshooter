@@ -1,0 +1,42 @@
+name: Deploy Cloudflare Workers
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run deployment checks
+        run: |
+          node test/version.test.mjs
+          node test/net-version-compat.test.mjs
+          node test/net-lan-public-discovery.test.mjs
+          node test/lobby-actions.test.mjs
+          node test/online-ui-state.test.mjs
+          node test/i18n.test.mjs
+          node --check src/main.js
+          node --check src/net.js
+          node --check src/networkConfig.js
+
+      - name: Build static assets
+        run: npm run build
+
+      - name: Deploy to Cloudflare Workers
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: deploy

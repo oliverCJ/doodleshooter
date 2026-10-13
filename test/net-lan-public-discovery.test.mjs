@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { Net } from '../src/net.js';
 import { LAN_SIGNALING } from '../src/networkConfig.js';
+import { SIGNALING_VERSION_LABEL } from '../src/version.js';
 
 const connectedIds = [];
 
@@ -51,14 +52,17 @@ class FakePeer {
 global.window = { Peer: FakePeer };
 global.location = { hostname: '192.168.1.20', protocol: 'http:', port: '8910' };
 
+const lanPrefix = `doodleshooter-${SIGNALING_VERSION_LABEL}-lan-`;
+const publicPrefix = `doodleshooter-${SIGNALING_VERSION_LABEL}-public-`;
+
 const net = new Net();
 net.setMode(LAN_SIGNALING, global.location);
 
 await assert.rejects(() => net.quickJoin(), /no open public lobbies/);
-assert.ok(connectedIds.includes('doodlelan-PUB0'), 'LAN quickJoin should scan LAN public slots');
-assert.ok(!connectedIds.some((id) => id.startsWith('doodledistrict-')), 'LAN quickJoin should not scan public internet prefix');
+assert.ok(connectedIds.includes(`${lanPrefix}PUB0`), 'LAN quickJoin should scan versioned LAN public slots');
+assert.ok(!connectedIds.some((id) => id.startsWith(publicPrefix)), 'LAN quickJoin should not scan public internet prefix');
 
 connectedIds.length = 0;
 const lobbies = await net.listLobbies();
 assert.deepEqual(lobbies, []);
-assert.ok(connectedIds.includes('doodlelan-PUB0'), 'LAN listLobbies should scan LAN public slots');
+assert.ok(connectedIds.includes(`${lanPrefix}PUB0`), 'LAN listLobbies should scan versioned LAN public slots');

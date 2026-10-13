@@ -154,6 +154,7 @@ function makeDeps(overrides = {}) {
   deps.net.mode = PUBLIC;
   assert.equal(lobbyActions.friendlyError(new Error('connection failed')), 'online.status.peerDirectFailed');
   assert.equal(lobbyActions.friendlyError(new Error('full')), 'online.status.full');
+  assert.equal(lobbyActions.friendlyError(Object.assign(new Error('version mismatch'), { details: { hostVersion: '1.1.1', clientVersion: '1.0.3' } })), 'online.status.versionMismatch');
 }
 
 {

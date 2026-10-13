@@ -54,6 +54,14 @@ assert.match(renderOnlineScreen({ i18n, state, actions }), /id="online"/);
 for (const id of ['setName', 'publicSignalToggle', 'lanTab', 'publicTab', 'quickBtn', 'createBtn', 'codeBox', 'joinBtn', 'refreshBtn', 'lobbyRows', 'backBtn']) {
   assert.match(renderOnlineScreen({ i18n, state, actions }), new RegExp(`id="${id}"`), `online screen should render ${id}`);
 }
+const lanUnavailableState = { ...state, onlineTab: 'lan', lanSignalingAvailable: false };
+const lanUnavailableHtml = renderOnlineScreen({ i18n, state: lanUnavailableState, actions });
+assert.match(lanUnavailableHtml, /online\.lanUnavailableHint/);
+assert.match(lanUnavailableHtml, /id="quickBtn" disabled/);
+assert.match(lanUnavailableHtml, /id="createBtn" disabled/);
+assert.match(lanUnavailableHtml, /id="codeBox"[^>]*disabled/);
+assert.match(lanUnavailableHtml, /id="joinBtn" disabled/);
+assert.match(lanUnavailableHtml, /id="refreshBtn" disabled/);
 assert.match(renderLobbyScreen({ i18n, state, actions }), /id="startBtn"/);
 assert.match(renderLobbyScreen({ i18n, state, actions }), /id="leaveBtn"/);
 assert.match(renderLobbyScreen({ i18n, state, actions }), /id="status"/);

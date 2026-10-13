@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 const main = readFileSync(new URL('../src/main.js', import.meta.url), 'utf8');
 const lobbyActions = readFileSync(new URL('../src/online/lobbyActions.js', import.meta.url), 'utf8');
 const pvpCombatRules = readFileSync(new URL('../src/gameplay/pvpCombatRules.js', import.meta.url), 'utf8');
+const networkConfig = readFileSync(new URL('../src/networkConfig.js', import.meta.url), 'utf8');
+const netSource = readFileSync(new URL('../src/net.js', import.meta.url), 'utf8');
 
 assert.match(main, /import \{[^}]*bindLobbyScreen[^}]*bindOnlineScreen[^}]*renderLobbyList[^}]*renderLobbyScreen[^}]*renderOnlineScreen[^}]*\} from '\.\/screens\/onlineMenu\.js';/, 'main should consume the online menu module and import renderLobbyList before injecting it into lobby actions');
 assert.match(main, /let onlineTab = 'lan'/, 'online UI should keep the selected network tab state');
@@ -20,6 +22,9 @@ assert.doesNotMatch(main, /async function quickPlay\(/, 'quickPlay should live i
 assert.doesNotMatch(main, /async function refreshLobbies\(/, 'refreshLobbies should live in src/online/lobbyActions.js');
 assert.doesNotMatch(main, /function friendlyError\(/, 'friendlyError should live in src/online/lobbyActions.js');
 assert.match(lobbyActions, /setMode\(deps\.lanSignaling, deps\.location, \{ allowStun: deps\.getPublicSignalingEnabled\(\) \}\)/, 'LAN mode should optionally use STUN assistance when public signaling is enabled');
+assert.match(networkConfig, /SIGNALING_VERSION_LABEL/, 'networkConfig should include the signaling version in peer id prefixes');
+assert.match(netSource, /compatMetadata/, 'Net should attach version metadata to outgoing connections');
+assert.match(netSource, /version mismatch/, 'Net should refuse incompatible signaling versions before seating peers');
 assert.match(main, /i18n\.t\('pvp\.lanDirectFailed'\)/, 'LAN connection failures should explain that direct P2P setup failed');
 assert.match(main, /\[network diagnostic\]/, 'LAN connection diagnostics should be visible in the browser console');
 assert.doesNotMatch(main, /querySelectorAll\('button'\)\) b\.disabled = false/, 'unlockButtons should not blindly re-enable every button');
